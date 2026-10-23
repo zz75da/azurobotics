@@ -69,7 +69,7 @@ def test_yunet_model_rejects_redirect_to_untrusted_host(tmp_path: Path, monkeypa
     assert not (tmp_path / (video_privacy.YUNET_MODEL_NAME + ".part")).exists()
 
 
-def test_pixelation_expands_face_box_and_changes_only_its_roi():
+def test_pixelation_changes_only_the_detected_face_box():
     frame = np.zeros((80, 100, 3), dtype=np.uint8)
     frame[:, :, 0] = np.arange(100, dtype=np.uint8)
     original = frame.copy()
@@ -81,9 +81,11 @@ def test_pixelation_expands_face_box_and_changes_only_its_roi():
         height=80,
     )
 
-    assert not np.array_equal(frame[15:58, 32:68], original[15:58, 32:68])
-    assert np.array_equal(frame[:10], original[:10])
-    assert np.array_equal(frame[:, :20], original[:, :20])
+    assert not np.array_equal(frame[25:45, 40:60], original[25:45, 40:60])
+    assert np.array_equal(frame[:25], original[:25])
+    assert np.array_equal(frame[45:], original[45:])
+    assert np.array_equal(frame[:, :40], original[:, :40])
+    assert np.array_equal(frame[:, 60:], original[:, 60:])
 
 
 def test_face_mode_uses_yunet_and_anonymizes_each_frame(tmp_path: Path, monkeypatch):
@@ -100,7 +102,7 @@ def test_face_mode_uses_yunet_and_anonymizes_each_frame(tmp_path: Path, monkeypa
 
         def detect(self, _frame):
             self.calls += 1
-            if self.calls % 5 == 1:
+            if self.calls % 6 == 1:
                 return 1, np.array([[100, 100, 30, 35, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.9]])
             return 1, None
 
@@ -111,11 +113,12 @@ def test_face_mode_uses_yunet_and_anonymizes_each_frame(tmp_path: Path, monkeypa
         lambda *_args: detector,
     )
 
-    output, frame_count, detections = video_privacy.anonymize_video(source_bytes, "faces")
+    output, frame_count, detections = video_privacy.anonymize_video(source_bytes)
 
     assert frame_count == 2
     assert detections == 2
-    assert detector.calls == frame_count * 5
+    # The synthetic scene is dark: full frame + low-light pass + four tiles.
+    assert detector.calls == frame_count * 6
     assert output
 
 
@@ -135,7 +138,7 @@ def test_multiscale_detection_finds_small_faces_and_suppresses_duplicates():
     detector = FakeDetector()
     faces = video_privacy._detect_faces_multiscale(
         detector,
-        np.zeros((360, 640, 3), dtype=np.uint8),
+        np.full((360, 640, 3), 128, dtype=np.uint8),
     )
 
     assert detector.calls == 5
@@ -144,6 +147,31 @@ def test_multiscale_detection_finds_small_faces_and_suppresses_duplicates():
     assert np.allclose(faces[0][:4], [60, 60, 24, 24])
 
 
-def test_invalid_blur_mode_is_rejected():
-    with pytest.raises(ValueError, match="Mode de floutage inconnu"):
-        video_privacy.anonymize_video(b"video", "unknown")
+def test_dark_frames_get_an_extra_low_light_detection_pass():
+    class FakeDetector:
+        def __init__(self):
+            self.frames = []
+
+        def detect(self, frame):
+            self.frames.append(frame)
+            return 1, None
+
+    detector = FakeDetector()
+    dark_frame = np.full((360, 640, 3), 20, dtype=np.uint8)
+    dark_frame[100:200, 100:200] = 40
+
+    video_privacy._detect_faces_multiscale(detector, dark_frame)
+
+    assert len(detector.frames) == 6
+    assert detector.frames[1].std() > detector.frames[0].std()
+
+
+def test_pixelation_is_coarse_on_large_faces():
+    rng = np.random.default_rng(0)
+    frame = rng.integers(0, 255, (720, 1280, 3), dtype=np.uint8)
+
+    video_privacy._pixelate_face(frame, np.array([400.0, 200.0, 300.0, 300.0]), 1280, 720)
+
+    region = frame[200:500, 400:700]
+    distinct_rows = len(np.unique(region[:, 0], axis=0))
+    assert distinct_rows <= video_privacy.PIXEL_MAX_BLOCKS

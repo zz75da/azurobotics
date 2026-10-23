@@ -26,10 +26,9 @@ YUNET_MODEL_MAX_BYTES = 1_000_000
 YUNET_SCORE_THRESHOLD = 0.35
 FACE_TILE_SCALE = 0.60
 FACE_NMS_THRESHOLD = 0.35
-FACE_MARGIN_X = 0.40
-FACE_MARGIN_TOP = 0.35
-FACE_MARGIN_BOTTOM = 0.65
+LOW_LIGHT_LUMA = 90
 PIXEL_BLOCK_SIZE = 12
+PIXEL_MAX_BLOCKS = 8
 
 
 def create_sample_video(destination: Path, seconds: int = 8, fps: int = 12) -> None:
@@ -58,17 +57,13 @@ def create_sample_video(destination: Path, seconds: int = 8, fps: int = 12) -> N
         writer.release()
 
 
-def anonymize_video(video_bytes: bytes, mode: str) -> Tuple[bytes, int, int]:
+def anonymize_video(video_bytes: bytes) -> Tuple[bytes, int, int]:
     if not video_bytes:
         raise ValueError("La vidéo envoyée est vide.")
     if len(video_bytes) > MAX_VIDEO_BYTES:
         raise ValueError("Vidéo trop volumineuse (limite : 250 Mo).")
-    if mode not in ("whole_frame", "faces"):
-        raise ValueError("Mode de floutage inconnu.")
 
-    model_path = None
-    if mode == "faces":
-        model_path = ensure_yunet_model(Path(__file__).resolve().parent / "data" / "models")
+    model_path = ensure_yunet_model(Path(__file__).resolve().parent / "data" / "models")
 
     with tempfile.TemporaryDirectory(prefix="robotics-video-") as directory:
         input_path = Path(directory) / "input_video"
@@ -92,22 +87,19 @@ def anonymize_video(video_bytes: bytes, mode: str) -> Tuple[bytes, int, int]:
         if not writer.isOpened():
             capture.release()
             raise RuntimeError("OpenCV ne peut pas encoder le MP4 de sortie.")
-        detector: Any = None
-        if mode == "faces":
-            assert model_path is not None
-            try:
-                detector = cv2.FaceDetectorYN_create(
-                    str(model_path),
-                    "",
-                    (width, height),
-                    YUNET_SCORE_THRESHOLD,
-                    0.3,
-                    5000,
-                )
-            except cv2.error as error:
-                capture.release()
-                writer.release()
-                raise RuntimeError("OpenCV ne peut pas charger le modèle de visages YuNet.") from error
+        try:
+            detector = cv2.FaceDetectorYN_create(
+                str(model_path),
+                "",
+                (width, height),
+                YUNET_SCORE_THRESHOLD,
+                0.3,
+                5000,
+            )
+        except cv2.error as error:
+            capture.release()
+            writer.release()
+            raise RuntimeError("OpenCV ne peut pas charger le modèle de visages YuNet.") from error
 
         frame_count = 0
         detected_count = 0
@@ -116,14 +108,11 @@ def anonymize_video(video_bytes: bytes, mode: str) -> Tuple[bytes, int, int]:
                 ok, frame = capture.read()
                 if not ok:
                     break
-                if mode == "whole_frame":
-                    frame = cv2.GaussianBlur(frame, (51, 51), 0)
-                else:
-                    faces = _detect_faces_multiscale(detector, frame)
-                    if faces is not None:
-                        detected_count += len(faces)
-                        for face in faces:
-                            _pixelate_face(frame, face, width, height)
+                faces = _detect_faces_multiscale(detector, frame)
+                if faces is not None:
+                    detected_count += len(faces)
+                    for face in faces:
+                        _pixelate_face(frame, face, width, height)
                 writer.write(frame)
                 frame_count += 1
         finally:
@@ -190,6 +179,11 @@ def _detect_faces_multiscale(detector: Any, frame: np.ndarray) -> np.ndarray | N
     if full_frame_faces is not None:
         candidates.extend(full_frame_faces)
 
+    if cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).mean() < LOW_LIGHT_LUMA:
+        _, low_light_faces = detector.detect(_enhance_low_light(frame))
+        if low_light_faces is not None:
+            candidates.extend(low_light_faces)
+
     tile_width = max(1, int(round(width * FACE_TILE_SCALE)))
     tile_height = max(1, int(round(height * FACE_TILE_SCALE)))
     x_positions = sorted({0, max(0, width - tile_width)})
@@ -235,22 +229,26 @@ def _detect_faces_multiscale(detector: Any, frame: np.ndarray) -> np.ndarray | N
     return np.asarray([candidates[int(index)] for index in np.asarray(kept_indices).reshape(-1)])
 
 
+def _enhance_low_light(frame: np.ndarray) -> np.ndarray:
+    lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+    lightness, channel_a, channel_b = cv2.split(lab)
+    lightness = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8)).apply(lightness)
+    return cv2.cvtColor(cv2.merge((lightness, channel_a, channel_b)), cv2.COLOR_LAB2BGR)
+
+
 def _pixelate_face(frame: np.ndarray, face: np.ndarray, width: int, height: int) -> None:
     x, y, face_width, face_height = (int(round(value)) for value in face[:4])
-    margin_x = int(round(face_width * FACE_MARGIN_X))
-    margin_top = int(round(face_height * FACE_MARGIN_TOP))
-    margin_bottom = int(round(face_height * FACE_MARGIN_BOTTOM))
-    x0 = max(0, x - margin_x)
-    y0 = max(0, y - margin_top)
-    x1 = min(width, x + face_width + margin_x)
-    y1 = min(height, y + face_height + margin_bottom)
+    x0 = max(0, x)
+    y0 = max(0, y)
+    x1 = min(width, x + face_width)
+    y1 = min(height, y + face_height)
     region = frame[y0:y1, x0:x1]
     if region.size == 0:
         return
 
     reduced_size = (
-        max(1, region.shape[1] // PIXEL_BLOCK_SIZE),
-        max(1, region.shape[0] // PIXEL_BLOCK_SIZE),
+        max(1, min(PIXEL_MAX_BLOCKS, region.shape[1] // PIXEL_BLOCK_SIZE)),
+        max(1, min(PIXEL_MAX_BLOCKS, region.shape[0] // PIXEL_BLOCK_SIZE)),
     )
     pixelated = cv2.resize(region, reduced_size, interpolation=cv2.INTER_AREA)
     frame[y0:y1, x0:x1] = cv2.resize(
