@@ -1,0 +1,29 @@
+groups:
+  - name: robotics-data-lab
+    rules:
+      - alert: RoboticsApplicationDown
+        expr: up{job="robotics-data-lab"} == 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: Robotics Data Lab is not reachable
+          description: Prometheus cannot scrape the application metrics endpoint.
+
+      - alert: RoboticsModelNotPromoted
+        expr: robotics_ml_model_promoted == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: No promoted robotics anomaly model
+          description: Train a candidate model and check its evaluation thresholds.
+
+      - alert: RoboticsPipelineFailures
+        expr: increase(robotics_pipeline_runs_total{status="failed"}[15m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: Robotics pipeline has recent failures
+          description: Review the local operation history and structured application logs.

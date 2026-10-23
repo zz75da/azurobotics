@@ -1,0 +1,75 @@
+services:
+  app:
+    build: .
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from urllib.request import urlopen; urlopen('http://127.0.0.1:8765/api/health', timeout=3)"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    mem_limit: 1g
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.15.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --storage.tsdb.retention.size=512MB
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 512m
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:13.2.4
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    mem_limit: 512m
+    restart: unless-stopped
+
+  evidently:
+    build: .
+    command:
+      - evidently
+      - ui
+      - --workspace
+      - /app/data/evidently
+      - --port
+      - "8000"
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./data/evidently:/app/data/evidently:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 768m
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:
+  grafana_data:

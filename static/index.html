@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Marso Robotics · Data Lab local</title>
+  <style>
+    :root { color-scheme: dark; --bg:#10151c; --panel:#19222d; --line:#2b3948; --muted:#9aabba; --text:#edf3f8; --accent:#68d5b1; --warn:#ffcf70; }
+    * { box-sizing:border-box }
+    body { margin:0; background:var(--bg); color:var(--text); font:15px/1.55 "Segoe UI",sans-serif }
+    header { border-bottom:1px solid var(--line); padding:24px max(24px,calc((100vw - 1150px)/2)); background:#131b24 }
+    .brand { color:var(--accent); font-size:12px; font-weight:700; letter-spacing:.15em; text-transform:uppercase }
+    h1 { margin:5px 0; font-size:25px } h2 { margin:0 0 12px; font-size:18px }
+    main { max-width:1150px; margin:26px auto; padding:0 20px 50px }
+    .intro { color:var(--muted); max-width:800px; margin-bottom:22px }
+    .badge { display:inline-block; padding:3px 9px; border:1px solid var(--line); border-radius:99px; color:var(--accent); font-size:12px }
+    .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px }
+    section { min-width:0; padding:20px; border:1px solid var(--line); border-radius:12px; background:var(--panel) }
+    .wide { grid-column:1/-1 }
+    p { color:var(--muted); margin:4px 0 14px }
+    button,.button { display:inline-block; border:0; border-radius:7px; background:var(--accent); color:#0d1918; font-weight:700; padding:10px 14px; cursor:pointer; text-decoration:none }
+    button:disabled { opacity:.55; cursor:wait }
+    input,select { color:var(--text); background:#101820; border:1px solid var(--line); border-radius:7px; padding:9px; max-width:100% }
+    .row { display:flex; align-items:center; gap:10px; flex-wrap:wrap }
+    .metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:16px 0 }
+    .metric { border:1px solid var(--line); border-radius:8px; padding:12px; background:#141c25 }
+    .metric strong { display:block; font-size:23px; color:var(--accent) }
+    .metric span { color:var(--muted); font-size:12px }
+    .bar-row { display:grid; grid-template-columns:110px 1fr 40px; align-items:center; gap:8px; margin:7px 0; font-size:13px }
+    .bar { height:9px; background:#253544; border-radius:9px; overflow:hidden }
+    .bar i { display:block; height:100%; background:var(--accent) }
+    .run-row { display:grid; grid-template-columns:150px 80px 90px 1fr; gap:10px; border-top:1px solid var(--line); padding:9px 0; font-size:13px }
+    .run-row span:nth-child(2) { color:var(--accent) }
+    .logs { max-height:220px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; background:#101820; border-radius:7px; padding:10px; color:var(--muted); font:12px/1.5 Consolas,monospace }
+    .small { font-size:12px }
+    .notice { border-left:3px solid var(--warn); padding:9px 12px; background:#28251d; color:#e9d6a6; font-size:13px }
+    .status { min-height:24px; color:var(--muted); margin-top:10px }
+    footer { max-width:1150px; margin:auto; padding:0 20px 25px; color:var(--muted); font-size:12px }
+    @media(max-width:700px) { .grid { grid-template-columns:1fr } .wide { grid-column:auto } .metrics { grid-template-columns:repeat(2,1fr) } }
+  </style>
+</head>
+<body>
+  <header><div class="brand">Marso Robotics · laboratoire local</div><h1>Exploration des données de flotte</h1><span class="badge">Traitement local · aucun envoi réseau</span></header>
+  <main>
+    <p class="intro">Prototype hors ligne pour tester l’analyse de télémétrie et le floutage vidéo. Générez un jeu synthétique ou importez des CSV/JSONL et des vidéos stockés sur votre PC.</p>
+    <div class="grid">
+      <section>
+        <h2>1 · Jeu de données de démonstration</h2>
+        <p>Créez et téléchargez une archive avec 600 événements AMR, des incidents JSONL et une courte vidéo d’entrepôt dessinée, sans données personnelles. Le CSV inclut un label synthétique is_anomaly pour les essais MLOps.</p>
+        <button id="sample">Générer et télécharger le jeu de test</button><div id="sampleStatus" class="status" aria-live="polite"></div>
+      </section>
+      <section>
+        <h2>2 · Analyser la télémétrie</h2>
+        <p>Importez un CSV ou JSONL local (25 Mo maximum). Les métriques sont calculées sur cet échantillon uniquement.</p>
+        <div class="row"><input id="dataFile" type="file" accept=".csv,.jsonl,.ndjson"><button id="analyze">Analyser</button></div>
+        <div id="analysisStatus" class="status" aria-live="polite"></div><div id="results"></div>
+      </section>
+      <section class="wide">
+        <h2>3 · Anonymiser une vidéo</h2>
+        <p>Importez MP4, AVI, MOV ou MKV (250 Mo maximum). Le mode visage utilise YuNet sur l’image et quatre recadrages agrandis, avec un seuil de détection plus permissif et une mosaïque renforcée ; le traitement peut prendre plus longtemps. Le modèle (environ 233 Ko) est téléchargé une fois depuis OpenCV Zoo.</p>
+        <div class="notice">Un détecteur amélioré peut encore manquer un visage, notamment s’il est masqué, très petit, flou ou hors champ. Vérifiez visuellement la vidéo complète avant tout partage ; le traitement automatique ne garantit pas à lui seul la conformité RGPD.</div>
+        <div class="row" style="margin-top:13px">
+          <input id="videoFile" type="file" accept="video/mp4,video/avi,video/quicktime,video/x-matroska">
+          <select id="blurMode" aria-label="Mode de floutage"><option value="whole_frame">Flouter toute l’image (protection la plus forte)</option><option value="faces">YuNet + mosaïque des visages</option></select>
+          <button id="anonymize">Traiter et télécharger</button>
+        </div>
+        <div id="videoStatus" class="status" aria-live="polite"></div>
+      </section>
+      <section class="wide">
+        <h2>4 · Orchestration et supervision</h2>
+        <p>Un pipeline de démonstration analyse périodiquement la télémétrie synthétique et réévalue le modèle. L’ordonnanceur local persiste son état et ses exécutions dans SQLite.</p>
+        <div class="row">
+          <label for="interval">Fréquence</label>
+          <select id="interval"><option value="60">Toutes les minutes</option><option value="300" selected>Toutes les 5 minutes</option><option value="900">Toutes les 15 minutes</option><option value="3600">Toutes les heures</option></select>
+          <button id="schedule">Activer la planification</button>
+          <button id="stopSchedule">Désactiver</button>
+          <button id="runNow">Exécuter maintenant</button>
+          <button id="refreshOps">Actualiser</button>
+        </div>
+        <div id="opsStatus" class="status" aria-live="polite"></div>
+        <div id="opsSummary" class="metrics"></div>
+        <h3>Exécutions récentes</h3><div id="runs"></div>
+        <h3>Journaux structurés récents</h3><pre id="logs" class="logs" aria-live="polite">Chargement…</pre>
+        <p class="small">Métriques Prometheus : <a href="/metrics" target="_blank" rel="noreferrer">/metrics</a>. Journaux JSON locaux dans <code>logs/app.jsonl</code>, rotation limitée à 8 Mio. La lecture périodique de cette page est mesurée, mais n’est pas ajoutée aux journaux pour éviter une boucle d’auto-journalisation. Historique des exécutions limité à 500 entrées.</p>
+      </section>
+      <section class="wide">
+        <h2>5 · Cycle MLOps local</h2>
+        <p>Entraînez un Isolation Forest sur les données synthétiques étiquetées, mesurez AUC/F1 sur un jeu de test et promouvez uniquement les modèles qui passent les seuils. Pour prédire, sélectionnez un CSV avec les colonnes numériques requises dans la section d’analyse.</p>
+        <div class="row">
+          <button id="trainModel">Entraîner (CSV sélectionné ou synthétique)</button>
+          <button id="predictData">Prédire et vérifier la dérive</button>
+          <button id="refreshMl">Actualiser l’état MLOps</button>
+          <a class="button" href="http://127.0.0.1:3000" target="_blank" rel="noreferrer">Grafana</a>
+          <a class="button" href="http://127.0.0.1:8000" target="_blank" rel="noreferrer">Evidently</a>
+        </div>
+        <div id="mlStatus" class="status" aria-live="polite"></div>
+        <div id="mlSummary" class="metrics"></div>
+        <div id="mlResult" class="logs" aria-live="polite">Aucun modèle ni lot de prédiction.</div>
+        <p class="small">Chaque prédiction crée un rapport de dérive Evidently ; seuls les résultats sont enregistrés, pas les lignes brutes. Les liens Grafana et Evidently nécessitent la stack Docker Compose.</p>
+      </section>
+    </div>
+  </main>
+  <footer>Prototype de validation, pas une plateforme de production. Les jeux de test sont synthétiques. Le navigateur communique uniquement avec le serveur sur 127.0.0.1.</footer>
+  <script>
+    const byId = id => document.getElementById(id);
+    function setBusy(button, busy, text) { button.disabled = busy; if (busy) button.dataset.label = button.textContent; button.textContent = busy ? text : (button.dataset.label || button.textContent); }
+    byId("sample").addEventListener("click", async event => {
+      const button = event.currentTarget, status = byId("sampleStatus");
+      setBusy(button, true, "Génération en cours…");
+      try {
+        const response = await fetch("/api/sample", {method:"POST"});
+        if (!response.ok) throw new Error((await response.json()).error || "Génération échouée.");
+        const blob = await response.blob(), url = URL.createObjectURL(blob), link = document.createElement("a");
+        link.href = url; link.download = "robotics-demo-samples.zip"; link.click(); URL.revokeObjectURL(url);
+        status.textContent = "Archive téléchargée. Extraction sous 10 Mo.";
+      } catch (error) { status.textContent = error.message; }
+      finally { setBusy(button, false); }
+    });
+    byId("analyze").addEventListener("click", async event => {
+      const file = byId("dataFile").files[0], status = byId("analysisStatus"), button = event.currentTarget;
+      if (!file) { status.textContent = "Choisissez d’abord un fichier CSV ou JSONL."; return; }
+      if (file.size > 25 * 1024 * 1024) { status.textContent = "Limite de taille : 25 Mo."; return; }
+      setBusy(button, true, "Analyse…");
+      try {
+        const content = await file.text();
+        const response = await fetch("/api/analyze", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({filename:file.name,content})});
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Analyse échouée.");
+        renderResults(result); status.textContent = "Analyse terminée en local.";
+      } catch (error) { status.textContent = error.message; byId("results").replaceChildren(); }
+      finally { setBusy(button, false); }
+    });
+    function renderResults(data) {
+      const target = byId("results"); target.replaceChildren();
+      const metrics = document.createElement("div"); metrics.className = "metrics";
+      const qualityIssues = Object.values(data.quality_issues || {}).reduce((sum, count) => sum + count, 0);
+      const values = [["Événements", data.events_total], ["Robots", data.robots_total], ["Incidents erreur", data.errors_total], ["Anomalies qualité", qualityIssues], ["Batterie moyenne", data.battery_avg_pct == null ? "—" : `${data.battery_avg_pct}%`]];
+      for (const [label, value] of values) { const card = document.createElement("div"); card.className = "metric"; const strong = document.createElement("strong"); strong.textContent = value; const caption = document.createElement("span"); caption.textContent = label; card.append(strong, caption); metrics.append(card); }
+      target.append(metrics);
+      const max = Math.max(...Object.values(data.event_counts), 1);
+      for (const [name, count] of Object.entries(data.event_counts)) {
+        const row = document.createElement("div"); row.className = "bar-row";
+        const label = document.createElement("span"); label.textContent = name;
+        const bar = document.createElement("div"); bar.className = "bar"; const fill = document.createElement("i"); fill.style.width = `${100 * count / max}%`; bar.append(fill);
+        const total = document.createElement("span"); total.textContent = count; row.append(label, bar, total); target.append(row);
+      }
+      const note = document.createElement("p"); note.textContent = "Durée moyenne : " + (data.duration_avg_ms == null ? "—" : `${data.duration_avg_ms} ms`) + ` · Taux d’erreur : ${data.error_rate_pct}% (sur les événements fournis, pas un SLA).`; target.append(note);
+    }
+    byId("anonymize").addEventListener("click", async event => {
+      const file = byId("videoFile").files[0], status = byId("videoStatus"), button = event.currentTarget;
+      if (!file) { status.textContent = "Choisissez d’abord une vidéo."; return; }
+      if (file.size > 250 * 1024 * 1024) { status.textContent = "Limite de taille : 250 Mo."; return; }
+      setBusy(button, true, "Traitement local…");
+      try {
+        const form = new FormData(); form.append("video", file);
+        const response = await fetch("/api/anonymize", {method:"POST",headers:{"X-Blur-Mode":byId("blurMode").value},body:form});
+        if (!response.ok) { const error = await response.json(); throw new Error(error.error || "Traitement échoué."); }
+        const blob = await response.blob(), url = URL.createObjectURL(blob), link = document.createElement("a");
+        link.href = url; link.download = file.name.replace(/\.[^.]+$/, "") + "_anonymisee.mp4"; link.click(); URL.revokeObjectURL(url);
+        const detected = response.headers.get("X-Detected-Faces");
+        status.textContent = byId("blurMode").value === "faces" ? `YuNet : ${detected} détections sur ${response.headers.get("X-Processed-Frames")} images, mosaïque pixelisée. Vérification humaine obligatoire.` : "Image entière floutée. Vérifiez le résultat avant tout partage.";
+      } catch (error) { status.textContent = error.message; }
+      finally { setBusy(button, false); }
+    });
+    async function operationsRequest(path, body) {
+      const options = body === undefined ? {} : {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)};
+      const response = await fetch(path, options), result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Opération impossible.");
+      return result;
+    }
+    function addMetric(container, label, value) {
+      const card = document.createElement("div"); card.className = "metric";
+      const strong = document.createElement("strong"); strong.textContent = value;
+      const caption = document.createElement("span"); caption.textContent = label;
+      card.append(strong, caption); container.append(card);
+    }
+    async function refreshOperations() {
+      const status = byId("opsStatus");
+      try {
+        const data = await operationsRequest("/api/operations");
+        const job = data.job, summary = byId("opsSummary"); summary.replaceChildren();
+        addMetric(summary, "Ordonnanceur", data.scheduler_running ? "Actif" : "Arrêté");
+        addMetric(summary, "Planification", job.enabled ? "Activée" : "Désactivée");
+        addMetric(summary, "Réussites", data.run_counts.success || 0);
+        addMetric(summary, "Échecs", data.run_counts.failed || 0);
+        byId("interval").value = String(job.interval_seconds);
+        const runs = byId("runs"); runs.replaceChildren();
+        if (!data.runs.length) { runs.textContent = "Aucune exécution enregistrée."; }
+        for (const run of data.runs) {
+          const row = document.createElement("div"); row.className = "run-row";
+          const date = document.createElement("span"); date.textContent = new Date(run.started_at).toLocaleString();
+          const state = document.createElement("span"); state.textContent = run.status;
+          const count = document.createElement("span"); count.textContent = `${run.records_processed} lignes`;
+          const detail = document.createElement("span");
+          detail.textContent = run.status === "failed" ? (run.error || "Échec") : (run.result ? `erreurs ${run.result.errors_total} · batterie ${run.result.battery_avg_pct}%` : "En cours");
+          row.append(date, state, count, detail); runs.append(row);
+        }
+        byId("logs").textContent = data.logs.slice(-30).map(item => JSON.stringify(item)).join("\n") || "Aucun journal pour le moment.";
+        status.textContent = job.enabled ? `Prochaine exécution : ${job.next_run_at ? new Date(job.next_run_at).toLocaleString() : "en attente"}` : "Ordonnanceur prêt ; planification désactivée.";
+      } catch (error) { status.textContent = error.message; }
+    }
+    byId("schedule").addEventListener("click", async () => {
+      try { await operationsRequest("/api/jobs/schedule", {interval_seconds:Number(byId("interval").value)}); await refreshOperations(); }
+      catch (error) { byId("opsStatus").textContent = error.message; }
+    });
+    byId("stopSchedule").addEventListener("click", async () => {
+      try { await operationsRequest("/api/jobs/stop", {}); await refreshOperations(); }
+      catch (error) { byId("opsStatus").textContent = error.message; }
+    });
+    byId("runNow").addEventListener("click", async event => {
+      const button = event.currentTarget; setBusy(button, true, "Exécution…");
+      try { await operationsRequest("/api/jobs/run", {}); await refreshOperations(); }
+      catch (error) { byId("opsStatus").textContent = error.message; }
+      finally { setBusy(button, false); }
+    });
+    byId("refreshOps").addEventListener("click", refreshOperations);
+    async function refreshMlOps(showProjectStatus = true) {
+      const status = byId("mlStatus"), summary = byId("mlSummary"), result = byId("mlResult");
+      try {
+        const data = await operationsRequest("/api/ml/status");
+        summary.replaceChildren();
+        const model = data.active_model;
+        addMetric(summary, "Modèle actif", model ? model.version : "Aucun");
+        addMetric(summary, "AUC", model ? model.metrics.roc_auc : "—");
+        addMetric(summary, "F1", model ? model.metrics.f1 : "—");
+        addMetric(summary, "Lots de prédiction", data.prediction_batches.length);
+        const latestBatch = data.prediction_batches[0];
+        result.textContent = model
+          ? `Modèle ${model.status} · ${model.training_rows} lignes d’entraînement · ${JSON.stringify(model.metrics)}\n` +
+            (latestBatch ? `Dernier lot : ${latestBatch.records_processed} lignes, ${latestBatch.anomalies_detected} anomalies · rapport ${latestBatch.evidently_snapshot_id}` : "Aucune prédiction encore.")
+          : "Aucun modèle promu. Entraînez d’abord le modèle de démonstration.";
+        if (showProjectStatus) status.textContent = `Projet Evidently : ${data.evidently_project}. Seuils de promotion : AUC ≥ ${data.promotion_thresholds.roc_auc}, F1 ≥ ${data.promotion_thresholds.f1}.`;
+      } catch (error) { status.textContent = error.message; }
+    }
+    byId("trainModel").addEventListener("click", async event => {
+      const button = event.currentTarget, status = byId("mlStatus");
+      setBusy(button, true, "Évaluation et entraînement…");
+      try {
+        const file = byId("dataFile").files[0];
+        let options = {method:"POST"};
+        if (file) {
+          if (!file.name.toLowerCase().endsWith(".csv")) throw new Error("L’entraînement MLOps accepte uniquement les CSV.");
+          if (file.size > 25 * 1024 * 1024) throw new Error("Limite de taille : 25 Mo.");
+          options = {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({filename:file.name,content:await file.text()})};
+        }
+        const response = await fetch("/api/ml/train", options), result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Entraînement échoué.");
+        status.textContent = `Modèle ${result.status} · version ${result.version} · Evidently ${result.evidently_snapshot_id}.`;
+        byId("mlResult").textContent = JSON.stringify(result, null, 2);
+        await refreshMlOps(false);
+      } catch (error) { status.textContent = error.message; }
+      finally { setBusy(button, false); }
+    });
+    byId("predictData").addEventListener("click", async event => {
+      const button = event.currentTarget, file = byId("dataFile").files[0], status = byId("mlStatus");
+      if (!file) { status.textContent = "Sélectionnez d’abord un CSV dans la section « Analyser la télémétrie »."; return; }
+      if (file.size > 25 * 1024 * 1024) { status.textContent = "Limite de taille : 25 Mo."; return; }
+      setBusy(button, true, "Prédiction et rapport Evidently…");
+      try {
+        const response = await fetch("/api/ml/predict", {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({filename:file.name,content:await file.text()})
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Prédiction échouée.");
+        byId("mlResult").textContent = JSON.stringify(result, null, 2);
+        status.textContent = `Lot traité : ${result.records_processed} lignes, ${result.anomalies_detected} anomalies. Rapport Evidently ${result.evidently_snapshot_id}.`;
+        await refreshMlOps(false);
+      } catch (error) { status.textContent = error.message; }
+      finally { setBusy(button, false); }
+    });
+    byId("refreshMl").addEventListener("click", refreshMlOps);
+    refreshOperations(); refreshMlOps(); window.setInterval(refreshOperations, 5000);
+  </script>
+</body>
+</html>
