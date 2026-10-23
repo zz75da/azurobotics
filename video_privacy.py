@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Tuple
 from urllib.error import URLError
@@ -26,6 +27,12 @@ YUNET_MODEL_MAX_BYTES = 1_000_000
 YUNET_SCORE_THRESHOLD = 0.35
 FACE_TILE_SCALE = 0.60
 FACE_NMS_THRESHOLD = 0.35
+FACE_MARGIN_X = 0.20
+FACE_MARGIN_TOP = 0.25
+FACE_MARGIN_BOTTOM = 0.25
+FACE_TRACK_HOLD_SECONDS = 0.25
+FACE_TRACK_MIN_HOLD_FRAMES = 2
+FACE_TRACK_IOU = 0.2
 LOW_LIGHT_LUMA = 90
 PIXEL_BLOCK_SIZE = 12
 PIXEL_MAX_BLOCKS = 8
@@ -101,6 +108,9 @@ def anonymize_video(video_bytes: bytes) -> Tuple[bytes, int, int]:
             writer.release()
             raise RuntimeError("OpenCV ne peut pas charger le modèle de visages YuNet.") from error
 
+        tracker = _FaceTracker(
+            max(FACE_TRACK_MIN_HOLD_FRAMES, int(round(fps * FACE_TRACK_HOLD_SECONDS)))
+        )
         frame_count = 0
         detected_count = 0
         try:
@@ -111,8 +121,8 @@ def anonymize_video(video_bytes: bytes) -> Tuple[bytes, int, int]:
                 faces = _detect_faces_multiscale(detector, frame)
                 if faces is not None:
                     detected_count += len(faces)
-                    for face in faces:
-                        _pixelate_face(frame, face, width, height)
+                for face_box in tracker.update(faces):
+                    _pixelate_face(frame, face_box, width, height)
                 writer.write(frame)
                 frame_count += 1
         finally:
@@ -236,12 +246,72 @@ def _enhance_low_light(frame: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(cv2.merge((lightness, channel_a, channel_b)), cv2.COLOR_LAB2BGR)
 
 
+def _box_iou(first: np.ndarray, second: np.ndarray) -> float:
+    x0 = max(first[0], second[0])
+    y0 = max(first[1], second[1])
+    x1 = min(first[0] + first[2], second[0] + second[2])
+    y1 = min(first[1] + first[3], second[1] + second[3])
+    intersection = max(0.0, x1 - x0) * max(0.0, y1 - y0)
+    union = first[2] * first[3] + second[2] * second[3] - intersection
+    return float(intersection / union) if union > 0 else 0.0
+
+
+@dataclass
+class _FaceTrack:
+    box: np.ndarray
+    velocity: np.ndarray
+    missed_frames: int = 0
+
+
+class _FaceTracker:
+    def __init__(self, hold_frames: int) -> None:
+        self.hold_frames = hold_frames
+        self._tracks: list[_FaceTrack] = []
+
+    def update(self, faces: np.ndarray | None) -> list[np.ndarray]:
+        unmatched = set(range(len(self._tracks)))
+        detections = [] if faces is None else [np.asarray(face[:4], dtype=np.float32) for face in faces]
+
+        for detection in detections:
+            best_index = max(
+                unmatched,
+                key=lambda index: _box_iou(
+                    self._tracks[index].box + self._tracks[index].velocity,
+                    detection,
+                ),
+                default=None,
+            )
+            if best_index is not None:
+                track = self._tracks[best_index]
+                predicted_box = track.box + track.velocity
+                if _box_iou(predicted_box, detection) >= FACE_TRACK_IOU:
+                    track.velocity = 0.5 * track.velocity + 0.5 * (detection - track.box)
+                    track.box = detection
+                    track.missed_frames = 0
+                    unmatched.remove(best_index)
+                    continue
+            self._tracks.append(_FaceTrack(detection, np.zeros(4, dtype=np.float32)))
+
+        retained: list[_FaceTrack] = []
+        for index, track in enumerate(self._tracks):
+            if index in unmatched:
+                track.box = track.box + track.velocity
+                track.missed_frames += 1
+            if track.missed_frames <= self.hold_frames:
+                retained.append(track)
+        self._tracks = retained
+        return [track.box for track in self._tracks]
+
+
 def _pixelate_face(frame: np.ndarray, face: np.ndarray, width: int, height: int) -> None:
     x, y, face_width, face_height = (int(round(value)) for value in face[:4])
-    x0 = max(0, x)
-    y0 = max(0, y)
-    x1 = min(width, x + face_width)
-    y1 = min(height, y + face_height)
+    margin_x = int(round(face_width * FACE_MARGIN_X))
+    margin_top = int(round(face_height * FACE_MARGIN_TOP))
+    margin_bottom = int(round(face_height * FACE_MARGIN_BOTTOM))
+    x0 = max(0, x - margin_x)
+    y0 = max(0, y - margin_top)
+    x1 = min(width, x + face_width + margin_x)
+    y1 = min(height, y + face_height + margin_bottom)
     region = frame[y0:y1, x0:x1]
     if region.size == 0:
         return

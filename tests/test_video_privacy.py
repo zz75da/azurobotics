@@ -69,9 +69,9 @@ def test_yunet_model_rejects_redirect_to_untrusted_host(tmp_path: Path, monkeypa
     assert not (tmp_path / (video_privacy.YUNET_MODEL_NAME + ".part")).exists()
 
 
-def test_pixelation_changes_only_the_detected_face_box():
+def test_pixelation_includes_margin_but_leaves_distant_regions_unchanged():
     frame = np.zeros((80, 100, 3), dtype=np.uint8)
-    frame[:, :, 0] = np.arange(100, dtype=np.uint8)
+    frame[:] = np.random.default_rng(0).integers(0, 255, frame.shape, dtype=np.uint8)
     original = frame.copy()
 
     video_privacy._pixelate_face(
@@ -81,11 +81,11 @@ def test_pixelation_changes_only_the_detected_face_box():
         height=80,
     )
 
-    assert not np.array_equal(frame[25:45, 40:60], original[25:45, 40:60])
-    assert np.array_equal(frame[:25], original[:25])
-    assert np.array_equal(frame[45:], original[45:])
-    assert np.array_equal(frame[:, :40], original[:, :40])
-    assert np.array_equal(frame[:, 60:], original[:, 60:])
+    assert not np.array_equal(frame[20:50, 36:64], original[20:50, 36:64])
+    assert np.array_equal(frame[:20], original[:20])
+    assert np.array_equal(frame[50:], original[50:])
+    assert np.array_equal(frame[:, :36], original[:, :36])
+    assert np.array_equal(frame[:, 64:], original[:, 64:])
 
 
 def test_face_mode_uses_yunet_and_anonymizes_each_frame(tmp_path: Path, monkeypatch):
@@ -166,12 +166,37 @@ def test_dark_frames_get_an_extra_low_light_detection_pass():
     assert detector.frames[1].std() > detector.frames[0].std()
 
 
+def test_tracker_masks_face_between_missed_frames_and_extrapolates_motion():
+    tracker = video_privacy._FaceTracker(hold_frames=2)
+    first_face = np.array([[100, 100, 40, 40]], dtype=np.float32)
+    next_face = np.array([[110, 100, 40, 40]], dtype=np.float32)
+
+    assert np.allclose(tracker.update(first_face)[0], [100, 100, 40, 40])
+    assert np.allclose(tracker.update(next_face)[0], [110, 100, 40, 40])
+    held = tracker.update(None)
+    assert len(held) == 1
+    assert held[0][0] > 110
+    assert len(tracker.update(None)) == 1
+    assert tracker.update(None) == []
+
+
+def test_tracker_keeps_two_faces_separate():
+    tracker = video_privacy._FaceTracker(hold_frames=2)
+    faces = np.array([[40, 50, 30, 30], [200, 50, 30, 30]], dtype=np.float32)
+
+    boxes = tracker.update(faces)
+
+    assert len(boxes) == 2
+    assert np.allclose(boxes[0], faces[0])
+    assert np.allclose(boxes[1], faces[1])
+
+
 def test_pixelation_is_coarse_on_large_faces():
     rng = np.random.default_rng(0)
     frame = rng.integers(0, 255, (720, 1280, 3), dtype=np.uint8)
 
     video_privacy._pixelate_face(frame, np.array([400.0, 200.0, 300.0, 300.0]), 1280, 720)
 
-    region = frame[200:500, 400:700]
+    region = frame[125:575, 340:760]
     distinct_rows = len(np.unique(region[:, 0], axis=0))
     assert distinct_rows <= video_privacy.PIXEL_MAX_BLOCKS
