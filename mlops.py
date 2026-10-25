@@ -17,7 +17,7 @@ import pandas as pd
 from evidently import DataDefinition, Dataset, Report
 from evidently.presets import DataDriftPreset
 from evidently.ui.workspace import Workspace
-from sklearn.ensemble import IsolationForest
+from sklearn.ensemble import IsolationForest, RandomForestClassifier
 from sklearn.metrics import f1_score, precision_recall_curve, precision_score, recall_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 
@@ -29,19 +29,71 @@ FEATURES = ("duration_ms", "battery_pct", "x_m", "y_m")
 MODEL_NAME = "robot-telemetry-isolation-forest"
 EVIDENTLY_PROJECT_NAME = "Marso Robotics - Telemetry Drift"
 MIN_TRAINING_ROWS = 40
-MAX_PREDICTION_ROWS = 20_000
+MAX_PREDICTION_ROWS = 200_000
+PREDICTION_CHUNK_ROWS = 10_000
+DRIFT_SAMPLE_ROWS = 20_000
+REFERENCE_MAX_ROWS = 20_000
 MODEL_RETENTION = 3
 MODEL_HISTORY_RETENTION = 100
 EVIDENTLY_RUN_RETENTION = 500
 PROMOTION_THRESHOLDS = {"roc_auc": 0.75, "f1": 0.5}
 LOG = logging.getLogger("robotics-demo.mlops")
+ALGORITHMS = ("isolation_forest", "random_forest", "auto")
 DEFAULT_HYPERPARAMETERS: Dict[str, Any] = {
+    "algorithm": "isolation_forest",
     "n_estimators": 150,
     "max_samples": "auto",
     "max_features": 1.0,
     "test_size": 0.25,
     "random_state": 42,
+    "max_depth": None,
+    "min_samples_leaf": 1,
+    "class_weight": "balanced",
+    "decision_threshold": 0.5,
 }
+
+
+class RandomForestAnomalyDetector(RandomForestClassifier):
+    """Supervised classifier exposing the IsolationForest contract.
+
+    predict() returns -1 for an anomaly and 1 otherwise; decision_function() is higher for
+    normal rows. Prediction, threshold selection and MLflow code can treat both models alike.
+    """
+
+    decision_threshold = 0.5
+
+    def _anomaly_probability(self, X):
+        proba = self.predict_proba(X)
+        return proba[:, list(self.classes_).index(1)]
+
+    def predict(self, X):
+        return np.where(self._anomaly_probability(X) >= self.decision_threshold, -1, 1)
+
+    def decision_function(self, X):
+        return -self._anomaly_probability(X)
+
+
+def _build_model(algorithm: str, hp: Dict[str, Any], contamination: float):
+    if algorithm == "random_forest":
+        model = RandomForestAnomalyDetector(
+            n_estimators=hp["n_estimators"],
+            max_features=hp["max_features"],
+            max_depth=hp["max_depth"],
+            min_samples_leaf=hp["min_samples_leaf"],
+            class_weight=hp["class_weight"],
+            random_state=hp["random_state"],
+            n_jobs=1,
+        )
+        model.decision_threshold = float(hp["decision_threshold"])
+        return model
+    return IsolationForest(
+        n_estimators=hp["n_estimators"],
+        max_samples=hp["max_samples"],
+        max_features=hp["max_features"],
+        contamination=contamination,
+        random_state=hp["random_state"],
+        n_jobs=1,
+    )
 
 
 def _select_threshold(model: IsolationForest, train_x, train_y, test_x, test_y) -> Dict[str, float]:
@@ -78,6 +130,8 @@ def _validate_hyperparameters(overrides: Dict[str, Any] | None) -> Dict[str, Any
     if unknown:
         raise ValueError("Hyperparamètres inconnus : {}.".format(", ".join(sorted(unknown))))
     hp.update(overrides)
+    if hp["algorithm"] not in ALGORITHMS:
+        raise ValueError("algorithm doit valoir : {}.".format(", ".join(ALGORITHMS)))
     for name in ("n_estimators", "random_state"):
         if isinstance(hp[name], bool) or not isinstance(hp[name], int):
             raise ValueError("{} doit être un entier.".format(name))
@@ -92,6 +146,17 @@ def _validate_hyperparameters(overrides: Dict[str, Any] | None) -> Dict[str, Any
     ms = hp["max_samples"]
     if ms != "auto" and (isinstance(ms, bool) or not isinstance(ms, (int, float)) or ms <= 0):
         raise ValueError("max_samples doit valoir 'auto' ou un nombre positif.")
+    depth = hp["max_depth"]
+    if depth is not None and (isinstance(depth, bool) or not isinstance(depth, int) or not 1 <= depth <= 50):
+        raise ValueError("max_depth doit valoir null ou un entier entre 1 et 50.")
+    leaf = hp["min_samples_leaf"]
+    if isinstance(leaf, bool) or not isinstance(leaf, int) or not 1 <= leaf <= 100:
+        raise ValueError("min_samples_leaf doit être un entier entre 1 et 100.")
+    if hp["class_weight"] not in (None, "balanced", "balanced_subsample"):
+        raise ValueError("class_weight doit valoir null, 'balanced' ou 'balanced_subsample'.")
+    threshold = hp["decision_threshold"]
+    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not 0.05 <= threshold <= 0.95:
+        raise ValueError("decision_threshold doit être compris entre 0.05 et 0.95.")
     return hp
 
 
@@ -163,6 +228,7 @@ class MLOpsService:
         hyperparameters: Dict[str, Any] | None = None,
         description: str | None = None,
         run_tags: Dict[str, Any] | None = None,
+        tuning_results: List[Dict[str, Any]] | None = None,
     ) -> Dict[str, Any]:
         hp = _validate_hyperparameters(hyperparameters)
         data_source = "synthetic-sample" if csv_content is None else "uploaded-csv"
@@ -188,16 +254,22 @@ class MLOpsService:
             random_state=hp["random_state"],
             stratify=labels,
         )
-        candidate = IsolationForest(
-            n_estimators=hp["n_estimators"],
-            max_samples=hp["max_samples"],
-            max_features=hp["max_features"],
-            contamination=contamination,
-            random_state=hp["random_state"],
-            n_jobs=1,
-        )
-        candidate.fit(train_x)
-        predicted = (candidate.predict(test_x) == -1).astype(int)
+        algorithms = ("isolation_forest", "random_forest") if hp["algorithm"] == "auto" else (hp["algorithm"],)
+        evaluated = []
+        for algorithm in algorithms:
+            model = _build_model(algorithm, hp, contamination)
+            model.fit(train_x, train_y) if algorithm == "random_forest" else model.fit(train_x)
+            model_predicted = (model.predict(test_x) == -1).astype(int)
+            evaluated.append(
+                (
+                    float(f1_score(test_y, model_predicted, zero_division=0)),
+                    float(roc_auc_score(test_y, -model.decision_function(test_x))),
+                    algorithm,
+                    model,
+                    model_predicted,
+                )
+            )
+        _, _, selected_algorithm, candidate, predicted = max(evaluated, key=lambda item: item[:2])
         anomaly_scores = -candidate.decision_function(test_x)
         metrics = {
             "roc_auc": round(float(roc_auc_score(test_y, anomaly_scores)), 4),
@@ -213,7 +285,7 @@ class MLOpsService:
             metrics[name] >= threshold for name, threshold in PROMOTION_THRESHOLDS.items()
         )
         version = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
-        snapshot_id = self._log_drift(test_x, train_x)
+        snapshot_id = self._log_drift(_sample_rows(test_x, DRIFT_SAMPLE_ROWS), _sample_rows(train_x, REFERENCE_MAX_ROWS))
 
         artifact_path: Path | None = None
         temporary_path: Path | None = None
@@ -224,7 +296,7 @@ class MLOpsService:
                     artifact_path = self.artifacts_path / "{}.joblib".format(version)
                     temporary_path = artifact_path.with_suffix(".joblib.tmp")
                     joblib.dump(
-                        {"model": candidate, "reference": train_x},
+                        {"model": candidate, "reference": _sample_rows(train_x, REFERENCE_MAX_ROWS)},
                         temporary_path,
                         compress=3,
                     )
@@ -283,7 +355,9 @@ class MLOpsService:
             model_name=MODEL_NAME,
             params={
                 **{"model__" + k: v for k, v in candidate.get_params().items()},
-                "algorithm": "IsolationForest",
+                "algorithm": type(candidate).__name__,
+                "algorithm_requested": hp["algorithm"],
+                "algorithm_candidates": ",".join(item[2] for item in evaluated),
                 "contamination": round(contamination, 4),
                 "test_size": hp["test_size"],
                 "split_random_state": hp["random_state"],
@@ -300,6 +374,7 @@ class MLOpsService:
             hyperparameters=hp,
             description=description,
             extra_tags=run_tags,
+            extra_artifacts={"tuning/sweep_results.json": tuning_results} if tuning_results else None,
             class_counts={int(k): int(v) for k, v in class_counts.items()},
             train_sample=train_x if data_source == "synthetic-sample" else None,
         )
@@ -321,6 +396,7 @@ class MLOpsService:
                 "La prédiction est limitée à {} lignes par lot.".format(MAX_PREDICTION_ROWS)
             )
         features = _to_feature_data(records)
+        drift_features = _sample_rows(features, DRIFT_SAMPLE_ROWS)
         with self._lock:
             model_row = self._latest_promoted_model()
             if model_row is None:
@@ -337,8 +413,13 @@ class MLOpsService:
             artifact = joblib.load(artifact_path)
             model: IsolationForest = artifact["model"]
             reference: pd.DataFrame = artifact["reference"]
-            snapshot_id = self._log_drift(features, reference)
-            predictions = (model.predict(features) == -1).astype(int)
+            snapshot_id = self._log_drift(drift_features, reference)
+            predictions = np.concatenate(
+                [
+                    (model.predict(features.iloc[start : start + PREDICTION_CHUNK_ROWS]) == -1).astype(int)
+                    for start in range(0, len(features), PREDICTION_CHUNK_ROWS)
+                ]
+            )
             anomaly_count = int(predictions.sum())
             batch_id = uuid.uuid4().hex
             with self._connect() as connection:
@@ -534,6 +615,12 @@ def _read_csv(content: str, require_labels: bool) -> List[Dict[str, str]]:
             raise ValueError("Valeur manquante parmi les colonnes numériques à la ligne {}.".format(row_number))
         records.append(row)
     return records
+
+
+def _sample_rows(frame: pd.DataFrame, limit: int) -> pd.DataFrame:
+    if len(frame) <= limit:
+        return frame
+    return frame.sample(n=limit, random_state=42).reset_index(drop=True)
 
 
 def _to_feature_data(records: List[Dict[str, str]]) -> pd.DataFrame:

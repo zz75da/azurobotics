@@ -18,7 +18,7 @@ from observability import RequestMetrics, configure_logging, read_recent_logs
 from mlops import MLOpsService
 from operations import PipelineOrchestrator
 from robot_data import analyze_text, make_sample_bundle
-from video_privacy import anonymize_video
+from video_privacy import anonymize_video_isolated
 
 
 ROOT = Path(__file__).resolve().parent
@@ -259,6 +259,7 @@ class Handler(BaseHTTPRequestHandler):
                 "hyperparameters": request.get("hyperparameters"),
                 "description": request.get("description"),
                 "run_tags": request.get("tags"),
+                "tuning_results": _validate_tuning_results(request.get("tuning_results")),
             }
             if content is None:
                 self._send_json(MLOPS.train(None, **options))
@@ -363,6 +364,16 @@ class Handler(BaseHTTPRequestHandler):
         self._send_bytes(path.read_bytes(), content_type)
 
 
+def _validate_tuning_results(value: Any) -> list | None:
+    if value is None:
+        return None
+    if not isinstance(value, list) or len(value) > 500 or not all(isinstance(item, dict) for item in value):
+        raise ValueError("tuning_results doit être une liste d'au plus 500 objets.")
+    if len(json.dumps(value)) > 200_000:
+        raise ValueError("tuning_results est trop volumineux.")
+    return value
+
+
 def main() -> None:
     global MLOPS, ORCHESTRATOR, LOG_PATH
     LOG_PATH = configure_logging(ROOT / "logs")
@@ -406,7 +417,7 @@ def _start_video_job(payload: bytes, name: str) -> str:
 
     def run() -> None:
         try:
-            output, frames, faces = anonymize_video(payload)
+            output, frames, faces = anonymize_video_isolated(payload)
             result = {"status": "done", "output": output, "frames": frames, "faces": faces}
         except ValueError as error:
             result = {"status": "error", "error": str(error)}

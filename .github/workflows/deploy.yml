@@ -91,8 +91,14 @@ jobs:
           echo "revision health: $state"
           [ "$state" = "Healthy" ]
           # Easy Auth answers 302 to the Entra login for anonymous callers.
-          code=$(curl -s -o /dev/null -w '%{http_code}' "https://${fqdn}/.auth/login/aad")
-          echo "login endpoint: $code"
+          # A cold start can exceed a single request timeout, so retry with short timeouts.
+          code=000
+          for i in $(seq 1 12); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "https://${fqdn}/.auth/login/aad" || true)
+            echo "login endpoint (attempt $i): $code"
+            [ "$code" = "302" ] && break
+            sleep 10
+          done
           [ "$code" = "302" ]
 
   retrain:
