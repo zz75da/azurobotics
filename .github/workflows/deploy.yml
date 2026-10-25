@@ -71,8 +71,10 @@ jobs:
             --image "${REGISTRY}.azurecr.io/robotics-demo:${GITHUB_SHA}" --revision-suffix "$suffix" -o none
           az containerapp update -g "$RESOURCE_GROUP" -n "$GRAFANA_APP_NAME" \
             --image "${REGISTRY}.azurecr.io/grafana-robotics:latest" --revision-suffix "$suffix" -o none
+          mlflow_fqdn=$(az containerapp show -g "$RESOURCE_GROUP" -n "$MLFLOW_APP_NAME" --query properties.configuration.ingress.fqdn -o tsv)
           az containerapp update -g "$RESOURCE_GROUP" -n "$MLFLOW_APP_NAME" \
-            --image "${REGISTRY}.azurecr.io/mlflow-server:latest" --revision-suffix "$suffix" -o none
+            --image "${REGISTRY}.azurecr.io/mlflow-server:latest" --revision-suffix "$suffix" \
+            --set-env-vars "MLFLOW_SERVER_CORS_ALLOWED_ORIGINS=https://${mlflow_fqdn}" -o none
 
   smoke:
     needs: deploy
