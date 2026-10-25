@@ -12,12 +12,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import joblib
+import numpy as np
 import pandas as pd
 from evidently import DataDefinition, Dataset, Report
 from evidently.presets import DataDriftPreset
 from evidently.ui.workspace import Workspace
 from sklearn.ensemble import IsolationForest
-from sklearn.metrics import f1_score, precision_score, recall_score, roc_auc_score
+from sklearn.metrics import f1_score, precision_recall_curve, precision_score, recall_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 
 from robot_data import make_sample_telemetry_csv
@@ -41,6 +42,30 @@ DEFAULT_HYPERPARAMETERS: Dict[str, Any] = {
     "test_size": 0.25,
     "random_state": 42,
 }
+
+
+def _select_threshold(model: IsolationForest, train_x, train_y, test_x, test_y) -> Dict[str, float]:
+    """Pick the F1-optimal score threshold on the training split, then report it on the test split.
+
+    Informational only: the promotion gate still uses the model's default decision rule.
+    """
+    try:
+        train_scores = -model.decision_function(train_x)
+        precision, recall, thresholds = precision_recall_curve(train_y, train_scores)
+        if len(thresholds) == 0:
+            return {}
+        f1_curve = 2 * precision[:-1] * recall[:-1] / np.maximum(precision[:-1] + recall[:-1], 1e-12)
+        threshold = float(thresholds[int(np.argmax(f1_curve))])
+        predicted = (-model.decision_function(test_x) >= threshold).astype(int)
+        return {
+            "decision_threshold": round(threshold, 4),
+            "f1_tuned": round(float(f1_score(test_y, predicted, zero_division=0)), 4),
+            "precision_tuned": round(float(precision_score(test_y, predicted, zero_division=0)), 4),
+            "recall_tuned": round(float(recall_score(test_y, predicted, zero_division=0)), 4),
+        }
+    except Exception:
+        LOG.exception("threshold_selection_failed")
+        return {}
 
 
 def _validate_hyperparameters(overrides: Dict[str, Any] | None) -> Dict[str, Any]:
@@ -182,6 +207,8 @@ class MLOpsService:
             "train_rows": int(len(train_x)),
             "test_rows": int(len(test_x)),
         }
+        threshold_info = _select_threshold(candidate, train_x, train_y, test_x, test_y)
+        metrics.update(threshold_info)
         promoted = all(
             metrics[name] >= threshold for name, threshold in PROMOTION_THRESHOLDS.items()
         )
