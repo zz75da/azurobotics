@@ -3,7 +3,7 @@ FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1 \
     GIT_PYTHON_REFRESH=quiet
 
-RUN python -m pip install --no-cache-dir --disable-pip-version-check mlflow==3.1.4
+RUN python -m pip install --no-cache-dir --disable-pip-version-check mlflow==3.17.2
 
 EXPOSE 5000
 

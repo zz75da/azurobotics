@@ -23,6 +23,7 @@ env:
   REGISTRY: ${{ vars.AZURE_REGISTRY_NAME }}
   APP_NAME: ${{ vars.AZURE_APP_NAME }}
   GRAFANA_APP_NAME: ${{ vars.AZURE_GRAFANA_APP_NAME }}
+  MLFLOW_APP_NAME: ${{ vars.AZURE_MLFLOW_APP_NAME }}
 
 jobs:
   test:
@@ -51,6 +52,7 @@ jobs:
           az acr build -r "$REGISTRY" -t "robotics-demo:${GITHUB_SHA}" -t robotics-demo:latest . --no-logs
           az acr build -r "$REGISTRY" -t grafana-robotics:latest \
             --build-arg SUBSCRIPTION_ID="${{ vars.AZURE_SUBSCRIPTION_ID }}" grafana --no-logs
+          az acr build -r "$REGISTRY" -t mlflow-server:latest mlflow-server --no-logs
 
   deploy:
     needs: build
@@ -69,6 +71,8 @@ jobs:
             --image "${REGISTRY}.azurecr.io/robotics-demo:${GITHUB_SHA}" --revision-suffix "$suffix" -o none
           az containerapp update -g "$RESOURCE_GROUP" -n "$GRAFANA_APP_NAME" \
             --image "${REGISTRY}.azurecr.io/grafana-robotics:latest" --revision-suffix "$suffix" -o none
+          az containerapp update -g "$RESOURCE_GROUP" -n "$MLFLOW_APP_NAME" \
+            --image "${REGISTRY}.azurecr.io/mlflow-server:latest" --revision-suffix "$suffix" -o none
 
   smoke:
     needs: deploy
