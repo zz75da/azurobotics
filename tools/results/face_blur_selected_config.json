@@ -1,0 +1,18 @@
+{
+  "detector": "scrfd",
+  "fps": 12,
+  "hold_frames": 3,
+  "hold_seconds": 0.25,
+  "inflation_per_miss": 0.0,
+  "margins": {
+    "bottom": 0.25,
+    "top": 0.25,
+    "x": 0.2
+  },
+  "nms": 0.35,
+  "threshold": 0.25,
+  "tile_grid": 3,
+  "tile_overlap": 0.25,
+  "tile_scale": 0.7,
+  "tracker": "none"
+}
