@@ -1,7 +1,8 @@
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
-    GIT_PYTHON_REFRESH=quiet
+    GIT_PYTHON_REFRESH=quiet \
+    MLFLOW_ALLOW_FILE_STORE=true
 
 RUN python -m pip install --no-cache-dir --disable-pip-version-check mlflow==3.17.2
 
