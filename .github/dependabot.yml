@@ -5,6 +5,12 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
+    # These share a numpy ABI and are pinned together; upgrade them in one tested pull request.
+    ignore:
+      - dependency-name: numpy
+      - dependency-name: pandas
+      - dependency-name: opencv-python-headless
+      - dependency-name: scikit-learn
   - package-ecosystem: docker
     directory: /
     schedule:
@@ -21,3 +27,6 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
