@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Tuple
@@ -132,6 +133,62 @@ def anonymize_video(video_bytes: bytes) -> Tuple[bytes, int, int]:
             raise ValueError("La vidéo ne contient aucune image lisible.")
         output = output_path.read_bytes()
         return output, frame_count, detected_count
+
+
+VIDEO_SUBPROCESS_TIMEOUT_SECONDS = 1800
+
+
+def _video_worker(input_path: str, output_path: str, queue: Any) -> None:
+    try:
+        output, frames, faces = anonymize_video(Path(input_path).read_bytes())
+        Path(output_path).write_bytes(output)
+        queue.put(("ok", frames, faces))
+    except ValueError as error:
+        queue.put(("value_error", str(error)))
+    except BaseException as error:  # noqa: BLE001 - reported to the parent process
+        queue.put(("error", repr(error)))
+
+
+def anonymize_video_isolated(
+    video_bytes: bytes, timeout: float = VIDEO_SUBPROCESS_TIMEOUT_SECONDS
+) -> Tuple[bytes, int, int]:
+    """Run anonymize_video in a child process so an OOM or hang cannot take down the server."""
+    import multiprocessing
+
+    context = multiprocessing.get_context("spawn")
+    with tempfile.TemporaryDirectory(prefix="video-job-") as directory:
+        input_path = Path(directory) / "input.bin"
+        output_path = Path(directory) / "output.mp4"
+        input_path.write_bytes(video_bytes)
+        queue = context.Queue()
+        process = context.Process(
+            target=_video_worker, args=(str(input_path), str(output_path), queue), daemon=True
+        )
+        process.start()
+        deadline = time.monotonic() + timeout
+        message = None
+        while message is None:
+            try:
+                message = queue.get(timeout=1)
+            except Exception:
+                if not process.is_alive():
+                    try:
+                        message = queue.get(timeout=1)
+                    except Exception:
+                        process.join()
+                        raise RuntimeError("Le processus vidéo s'est arrêté (mémoire insuffisante ?).")
+                elif time.monotonic() > deadline:
+                    process.kill()
+                    process.join()
+                    raise RuntimeError("Le traitement vidéo a dépassé le délai autorisé.")
+        process.join(timeout=30)
+        if process.is_alive():
+            process.kill()
+        if message[0] == "ok":
+            return output_path.read_bytes(), message[1], message[2]
+        if message[0] == "value_error":
+            raise ValueError(message[1])
+        raise RuntimeError(message[1])
 
 
 def ensure_yunet_model(directory: Path) -> Path:
