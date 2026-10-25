@@ -1,6 +1,6 @@
 opencv-python-headless==4.10.0.84
 evidently==0.7.23
-joblib==1.4.2
+joblib==1.6.0
 numpy==1.26.4
 pandas==2.2.3
 scikit-learn==1.6.1
