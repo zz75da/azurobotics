@@ -29,7 +29,10 @@ FEATURES = ("duration_ms", "battery_pct", "x_m", "y_m")
 MODEL_NAME = "robot-telemetry-isolation-forest"
 EVIDENTLY_PROJECT_NAME = "Marso Robotics - Telemetry Drift"
 MIN_TRAINING_ROWS = 40
-MAX_PREDICTION_ROWS = 20_000
+MAX_PREDICTION_ROWS = 200_000
+PREDICTION_CHUNK_ROWS = 10_000
+DRIFT_SAMPLE_ROWS = 20_000
+REFERENCE_MAX_ROWS = 20_000
 MODEL_RETENTION = 3
 MODEL_HISTORY_RETENTION = 100
 EVIDENTLY_RUN_RETENTION = 500
@@ -213,7 +216,7 @@ class MLOpsService:
             metrics[name] >= threshold for name, threshold in PROMOTION_THRESHOLDS.items()
         )
         version = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
-        snapshot_id = self._log_drift(test_x, train_x)
+        snapshot_id = self._log_drift(_sample_rows(test_x, DRIFT_SAMPLE_ROWS), _sample_rows(train_x, REFERENCE_MAX_ROWS))
 
         artifact_path: Path | None = None
         temporary_path: Path | None = None
@@ -224,7 +227,7 @@ class MLOpsService:
                     artifact_path = self.artifacts_path / "{}.joblib".format(version)
                     temporary_path = artifact_path.with_suffix(".joblib.tmp")
                     joblib.dump(
-                        {"model": candidate, "reference": train_x},
+                        {"model": candidate, "reference": _sample_rows(train_x, REFERENCE_MAX_ROWS)},
                         temporary_path,
                         compress=3,
                     )
@@ -321,6 +324,7 @@ class MLOpsService:
                 "La prédiction est limitée à {} lignes par lot.".format(MAX_PREDICTION_ROWS)
             )
         features = _to_feature_data(records)
+        drift_features = _sample_rows(features, DRIFT_SAMPLE_ROWS)
         with self._lock:
             model_row = self._latest_promoted_model()
             if model_row is None:
@@ -337,8 +341,13 @@ class MLOpsService:
             artifact = joblib.load(artifact_path)
             model: IsolationForest = artifact["model"]
             reference: pd.DataFrame = artifact["reference"]
-            snapshot_id = self._log_drift(features, reference)
-            predictions = (model.predict(features) == -1).astype(int)
+            snapshot_id = self._log_drift(drift_features, reference)
+            predictions = np.concatenate(
+                [
+                    (model.predict(features.iloc[start : start + PREDICTION_CHUNK_ROWS]) == -1).astype(int)
+                    for start in range(0, len(features), PREDICTION_CHUNK_ROWS)
+                ]
+            )
             anomaly_count = int(predictions.sum())
             batch_id = uuid.uuid4().hex
             with self._connect() as connection:
@@ -534,6 +543,12 @@ def _read_csv(content: str, require_labels: bool) -> List[Dict[str, str]]:
             raise ValueError("Valeur manquante parmi les colonnes numériques à la ligne {}.".format(row_number))
         records.append(row)
     return records
+
+
+def _sample_rows(frame: pd.DataFrame, limit: int) -> pd.DataFrame:
+    if len(frame) <= limit:
+        return frame
+    return frame.sample(n=limit, random_state=42).reset_index(drop=True)
 
 
 def _to_feature_data(records: List[Dict[str, str]]) -> pd.DataFrame:

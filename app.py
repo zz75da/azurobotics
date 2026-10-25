@@ -18,7 +18,7 @@ from observability import RequestMetrics, configure_logging, read_recent_logs
 from mlops import MLOpsService
 from operations import PipelineOrchestrator
 from robot_data import analyze_text, make_sample_bundle
-from video_privacy import anonymize_video
+from video_privacy import anonymize_video_isolated
 
 
 ROOT = Path(__file__).resolve().parent
@@ -406,7 +406,7 @@ def _start_video_job(payload: bytes, name: str) -> str:
 
     def run() -> None:
         try:
-            output, frames, faces = anonymize_video(payload)
+            output, frames, faces = anonymize_video_isolated(payload)
             result = {"status": "done", "output": output, "frames": frames, "faces": faces}
         except ValueError as error:
             result = {"status": "error", "error": str(error)}
