@@ -34,6 +34,40 @@ MODEL_HISTORY_RETENTION = 100
 EVIDENTLY_RUN_RETENTION = 500
 PROMOTION_THRESHOLDS = {"roc_auc": 0.75, "f1": 0.5}
 LOG = logging.getLogger("robotics-demo.mlops")
+DEFAULT_HYPERPARAMETERS: Dict[str, Any] = {
+    "n_estimators": 150,
+    "max_samples": "auto",
+    "max_features": 1.0,
+    "test_size": 0.25,
+    "random_state": 42,
+}
+
+
+def _validate_hyperparameters(overrides: Dict[str, Any] | None) -> Dict[str, Any]:
+    hp = dict(DEFAULT_HYPERPARAMETERS)
+    if not overrides:
+        return hp
+    if not isinstance(overrides, dict):
+        raise ValueError("hyperparameters doit être un objet JSON.")
+    unknown = set(overrides) - set(hp)
+    if unknown:
+        raise ValueError("Hyperparamètres inconnus : {}.".format(", ".join(sorted(unknown))))
+    hp.update(overrides)
+    for name in ("n_estimators", "random_state"):
+        if isinstance(hp[name], bool) or not isinstance(hp[name], int):
+            raise ValueError("{} doit être un entier.".format(name))
+    if not 10 <= hp["n_estimators"] <= 1000:
+        raise ValueError("n_estimators doit être compris entre 10 et 1000.")
+    if not 0 <= hp["random_state"] <= 2**31 - 1:
+        raise ValueError("random_state est hors limites.")
+    if isinstance(hp["test_size"], bool) or not isinstance(hp["test_size"], (int, float)) or not 0.1 <= hp["test_size"] <= 0.5:
+        raise ValueError("test_size doit être compris entre 0.1 et 0.5.")
+    if isinstance(hp["max_features"], bool) or not isinstance(hp["max_features"], (int, float)) or not 0 < hp["max_features"] <= 1:
+        raise ValueError("max_features doit être compris entre 0 (exclu) et 1.")
+    ms = hp["max_samples"]
+    if ms != "auto" and (isinstance(ms, bool) or not isinstance(ms, (int, float)) or ms <= 0):
+        raise ValueError("max_samples doit valoir 'auto' ou un nombre positif.")
+    return hp
 
 
 def _utc_now() -> str:
@@ -98,7 +132,15 @@ class MLOpsService:
                 """
             )
 
-    def train(self, csv_content: str | None = None) -> Dict[str, Any]:
+    def train(
+        self,
+        csv_content: str | None = None,
+        hyperparameters: Dict[str, Any] | None = None,
+        description: str | None = None,
+        run_tags: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        hp = _validate_hyperparameters(hyperparameters)
+        data_source = "synthetic-sample" if csv_content is None else "uploaded-csv"
         source = make_sample_telemetry_csv() if csv_content is None else csv_content
         records = _read_csv(source, require_labels=True)
         if len(records) < MIN_TRAINING_ROWS:
@@ -117,14 +159,16 @@ class MLOpsService:
         train_x, test_x, train_y, test_y = train_test_split(
             features,
             labels,
-            test_size=0.25,
-            random_state=42,
+            test_size=hp["test_size"],
+            random_state=hp["random_state"],
             stratify=labels,
         )
         candidate = IsolationForest(
-            n_estimators=150,
+            n_estimators=hp["n_estimators"],
+            max_samples=hp["max_samples"],
+            max_features=hp["max_features"],
             contamination=contamination,
-            random_state=42,
+            random_state=hp["random_state"],
             n_jobs=1,
         )
         candidate.fit(train_x)
@@ -211,18 +255,26 @@ class MLOpsService:
             model=candidate,
             model_name=MODEL_NAME,
             params={
+                **{"model__" + k: v for k, v in candidate.get_params().items()},
                 "algorithm": "IsolationForest",
-                "n_estimators": 150,
                 "contamination": round(contamination, 4),
-                "random_state": 42,
-                "test_size": 0.25,
+                "test_size": hp["test_size"],
+                "split_random_state": hp["random_state"],
                 "features": ",".join(FEATURES),
+                "feature_count": len(FEATURES),
+                "stratified_split": True,
             },
             metrics=metrics,
             promoted=promoted,
             dataset_digest=digest_text(source),
             dataset_rows=len(records),
             thresholds=PROMOTION_THRESHOLDS,
+            data_source=data_source,
+            hyperparameters=hp,
+            description=description,
+            extra_tags=run_tags,
+            class_counts={int(k): int(v) for k, v in class_counts.items()},
+            train_sample=train_x if data_source == "synthetic-sample" else None,
         )
         return {
             "version": version,

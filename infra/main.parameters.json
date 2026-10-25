@@ -17,12 +17,6 @@
     "createdAt": {
       "value": "2026-10-24T17:02:18.5393457+02:00"
     },
-    "deployerObjectId": {
-      "value": "793956ae-e121-4af2-8687-6a307f2f73b3"
-    },
-    "tenantId": {
-      "value": "a1ad629a-b39c-44ea-9be8-b90e481385be"
-    },
     "resourceGroupName": {
       "value": "rg-marso-dev-99ff"
     },

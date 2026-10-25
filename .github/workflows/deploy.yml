@@ -1,0 +1,102 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      retrain:
+        description: Retrain the model after deploying
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+  REGISTRY: ${{ vars.AZURE_REGISTRY_NAME }}
+  APP_NAME: ${{ vars.AZURE_APP_NAME }}
+  GRAFANA_APP_NAME: ${{ vars.AZURE_GRAFANA_APP_NAME }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt pytest
+      - run: python -m pytest -q
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Build images in ACR
+        run: |
+          az acr build -r "$REGISTRY" -t "robotics-demo:${GITHUB_SHA}" -t robotics-demo:latest . --no-logs
+          az acr build -r "$REGISTRY" -t grafana-robotics:latest \
+            --build-arg SUBSCRIPTION_ID="${{ vars.AZURE_SUBSCRIPTION_ID }}" grafana --no-logs
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Roll out new revisions
+        run: |
+          suffix="g${GITHUB_RUN_ID}"
+          az containerapp update -g "$RESOURCE_GROUP" -n "$APP_NAME" \
+            --image "${REGISTRY}.azurecr.io/robotics-demo:${GITHUB_SHA}" --revision-suffix "$suffix" -o none
+          az containerapp update -g "$RESOURCE_GROUP" -n "$GRAFANA_APP_NAME" \
+            --image "${REGISTRY}.azurecr.io/grafana-robotics:latest" --revision-suffix "$suffix" -o none
+
+  smoke:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Wait for a healthy revision and check the sign-in redirect
+        run: |
+          fqdn=$(az containerapp show -g "$RESOURCE_GROUP" -n "$APP_NAME" --query properties.configuration.ingress.fqdn -o tsv)
+          for i in $(seq 1 20); do
+            state=$(az containerapp revision list -g "$RESOURCE_GROUP" -n "$APP_NAME" \
+              --query "[?properties.active] | [0].properties.healthState" -o tsv)
+            [ "$state" = "Healthy" ] && break
+            sleep 15
+          done
+          echo "revision health: $state"
+          [ "$state" = "Healthy" ]
+          # Easy Auth answers 302 to the Entra login for anonymous callers.
+          code=$(curl -s -o /dev/null -w '%{http_code}' "https://${fqdn}/.auth/login/aad")
+          echo "login endpoint: $code"
+          [ "$code" = "302" ]
+
+  retrain:
+    needs: smoke
+    if: github.event_name == 'workflow_dispatch' && inputs.retrain
+    uses: ./.github/workflows/retrain.yml
+    secrets: inherit

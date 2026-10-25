@@ -110,6 +110,13 @@ python -m pip install pytest
 python -m pytest -q
 ```
 
+## CI/CD (GitHub Actions)
+
+- `ci.yml` (PR et branches hors `main`) : tests, compilation Bicep, build Docker.
+- `deploy.yml` (push sur `main`) : tests → build ACR → déploiement (environnement `production`) → vérification de santé et redirection Entra ; réentraînement optionnel (`workflow_dispatch`).
+- `retrain.yml` (lundi 03:00 UTC ou manuel) : entraîne dans le conteneur et journalise dans MLflow (hyperparamètres, description).
+- Connexion Azure par OIDC, sans secret : variables du dépôt `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, `AZURE_REGISTRY_NAME`, `AZURE_APP_NAME`, `AZURE_GRAFANA_APP_NAME`. L'application Entra a le rôle Contributeur sur le groupe de ressources uniquement.
+
 ## Proposition d'architecture cible pour plusieurs To/jour
 
 Ce prototype n'est **pas** le pipeline de production : un serveur Python local et des fichiers ZIP ne peuvent pas absorber durablement plusieurs To/jour. Conserver le même contrat de données, puis faire évoluer les composants séparément :
