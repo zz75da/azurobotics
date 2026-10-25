@@ -21,6 +21,7 @@ from sklearn.metrics import f1_score, precision_score, recall_score, roc_auc_sco
 from sklearn.model_selection import train_test_split
 
 from robot_data import make_sample_telemetry_csv
+from experiment_tracking import digest_text, log_training_run
 
 
 FEATURES = ("duration_ms", "battery_pct", "x_m", "y_m")
@@ -205,12 +206,31 @@ class MLOpsService:
                 "records_processed": len(records),
             },
         )
+        mlflow_run_id = log_training_run(
+            version=version,
+            model=candidate,
+            model_name=MODEL_NAME,
+            params={
+                "algorithm": "IsolationForest",
+                "n_estimators": 150,
+                "contamination": round(contamination, 4),
+                "random_state": 42,
+                "test_size": 0.25,
+                "features": ",".join(FEATURES),
+            },
+            metrics=metrics,
+            promoted=promoted,
+            dataset_digest=digest_text(source),
+            dataset_rows=len(records),
+            thresholds=PROMOTION_THRESHOLDS,
+        )
         return {
             "version": version,
             "status": "promoted" if promoted else "rejected",
             "metrics": metrics,
             "thresholds": PROMOTION_THRESHOLDS,
             "evidently_snapshot_id": snapshot_id,
+            "mlflow_run_id": mlflow_run_id,
         }
 
     def predict(self, csv_content: str) -> Dict[str, Any]:

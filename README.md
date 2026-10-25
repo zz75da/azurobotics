@@ -36,6 +36,8 @@ python app.py
 
 Ouvrir <http://127.0.0.1:8765>. Pour choisir un autre port, définir `ROBOTICS_DEMO_PORT` avant `python app.py`. Pour télécharger des échantillons, cliquer sur « Générer et télécharger le jeu de test » ; le ZIP produit contient le CSV, le JSONL, la vidéo AVI et un descriptif. Le ZIP est construit à la demande, pas stocké sur disque.
 
+Par défaut, les requêtes POST n'acceptent que les hôtes locaux. Derrière un ingress Azure, définir `ROBOTICS_DEMO_ALLOWED_HOSTS` avec les noms d'hôte exacts autorisés, séparés par des virgules. Les origines de navigateur doivent utiliser l'un de ces mêmes hôtes ; aucun joker n'est pris en charge.
+
 ### Télécharger une vidéo par lien direct
 
 Le script autonome `download_video.py` accepte une URL HTTPS directe vers un fichier vidéo (.mp4, .webm, .mov, .avi, .mkv ou .m4v), de 250 Mo maximum. Lancer `python download_video.py` puis coller cette URL ; le fichier est enregistré dans `downloads/`. Il ne télécharge pas les pages YouTube (`youtu.be` inclus) et ne contourne pas les restrictions d'une plateforme. Téléchargez uniquement des fichiers que vous êtes autorisé à obtenir.

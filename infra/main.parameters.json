@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": {
+      "value": "marso-dev-99ff"
+    },
+    "location": {
+      "value": "francecentral"
+    },
+    "sessionId": {
+      "value": "99ff63b0-8444-4b8b-b5db-eadccc92238d"
+    },
+    "deployedBy": {
+      "value": "zzeghoud-admin"
+    },
+    "createdAt": {
+      "value": "2026-10-24T17:02:18.5393457+02:00"
+    },
+    "deployerObjectId": {
+      "value": "793956ae-e121-4af2-8687-6a307f2f73b3"
+    },
+    "tenantId": {
+      "value": "a1ad629a-b39c-44ea-9be8-b90e481385be"
+    },
+    "resourceGroupName": {
+      "value": "rg-marso-dev-99ff"
+    },
+    "containerAppsEnvironmentName": {
+      "value": "cae-marso-dev-99ff"
+    },
+    "containerAppName": {
+      "value": "ca-marso-dev-99ff"
+    },
+    "registryName": {
+      "value": "crmarsodev99ff"
+    },
+    "logAnalyticsName": {
+      "value": "log-marso-dev-99ff"
+    },
+    "keyVaultName": {
+      "value": "kv-marso-dev-99ff"
+    },
+    "enableIngress": {
+      "value": false
+    }
+  }
+}

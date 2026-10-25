@@ -1,11 +1,43 @@
 import json
 import threading
+from email.message import Message
 from http.server import ThreadingHTTPServer
 from urllib.request import Request, urlopen
 
 import app
+import pytest
 from mlops import MLOpsService
 from robot_data import make_sample_telemetry_csv
+
+
+def test_post_origin_accepts_configured_cloud_hostname(monkeypatch):
+    monkeypatch.setattr(app, "PORT", 8765)
+    monkeypatch.setenv("ROBOTICS_DEMO_ALLOWED_HOSTS", "robotics.example.com")
+    handler = app.Handler.__new__(app.Handler)
+    handler.headers = Message()
+    handler.headers["Host"] = "robotics.example.com"
+    handler.headers["Origin"] = "https://robotics.example.com"
+
+    handler._validate_local_origin()
+
+
+@pytest.mark.parametrize(
+    ("host", "origin"),
+    [
+        ("evil.example.com", "https://evil.example.com"),
+        ("robotics.example.com", "https://evil.example.com"),
+    ],
+)
+def test_post_origin_rejects_unconfigured_hosts_and_origins(monkeypatch, host, origin):
+    monkeypatch.setattr(app, "PORT", 8765)
+    monkeypatch.setenv("ROBOTICS_DEMO_ALLOWED_HOSTS", "robotics.example.com")
+    handler = app.Handler.__new__(app.Handler)
+    handler.headers = Message()
+    handler.headers["Host"] = host
+    handler.headers["Origin"] = origin
+
+    with pytest.raises(app.RequestError):
+        handler._validate_local_origin()
 
 
 def test_operations_polling_updates_metrics_without_appending_request_log(monkeypatch):

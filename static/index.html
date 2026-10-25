@@ -20,6 +20,7 @@
     .wide { grid-column:1/-1 }
     p { color:var(--muted); margin:4px 0 14px }
     button,.button { display:inline-block; border:0; border-radius:7px; background:var(--accent); color:#0d1918; font-weight:700; padding:10px 14px; cursor:pointer; text-decoration:none }
+    [hidden] { display:none !important }
     button:disabled { opacity:.55; cursor:wait }
     input,select { color:var(--text); background:#101820; border:1px solid var(--line); border-radius:7px; padding:9px; max-width:100% }
     .row { display:flex; align-items:center; gap:10px; flex-wrap:wrap }
@@ -90,14 +91,26 @@
           <button id="trainModel">Entraîner (CSV sélectionné ou synthétique)</button>
           <button id="predictData">Prédire et vérifier la dérive</button>
           <button id="refreshMl">Actualiser l’état MLOps</button>
-          <a class="button" href="http://127.0.0.1:3000" target="_blank" rel="noreferrer">Grafana</a>
-          <a class="button" href="http://127.0.0.1:8000" target="_blank" rel="noreferrer">Evidently</a>
+          <a id="grafanaLink" class="button" href="http://127.0.0.1:3000" target="_blank" rel="noreferrer">Grafana</a>
+          <a id="mlflowLink" class="button" href="http://127.0.0.1:5000" target="_blank" rel="noreferrer" hidden>MLflow</a>
+          <a class="button local-only" href="http://127.0.0.1:8000" target="_blank" rel="noreferrer">Evidently</a>
         </div>
         <div id="mlStatus" class="status" aria-live="polite"></div>
         <div id="mlSummary" class="metrics"></div>
         <div id="mlResult" class="logs" aria-live="polite">Aucun modèle ni lot de prédiction.</div>
-        <p class="small">Chaque prédiction crée un rapport de dérive Evidently ; seuls les résultats sont enregistrés, pas les lignes brutes. Les liens Grafana et Evidently nécessitent la stack Docker Compose.</p>
+        <p class="small">Chaque prédiction crée un rapport de dérive Evidently ; seuls les résultats sont enregistrés, pas les lignes brutes. <span class="local-only">Les liens Grafana et Evidently nécessitent la stack Docker Compose.</span><span id="cloudNote" hidden>Grafana et Evidently nécessitent la stack Docker Compose en local ; sur Azure, Grafana affiche les métriques Azure Monitor (premier chargement : environ 30 s) et Evidently n’est pas déployé.</span></p>
       </section>
+      <script>
+        if (!["localhost", "127.0.0.1"].includes(location.hostname)) {
+          document.querySelectorAll(".local-only").forEach(element => element.hidden = true);
+          document.getElementById("cloudNote").hidden = false;
+          const grafana = document.getElementById("grafanaLink");
+          grafana.href = "https://" + location.hostname.replace(/^ca-robotics-/, "ca-grafana-");
+                    const mlflow = document.getElementById("mlflowLink");
+                    mlflow.href = "https://" + location.hostname.replace(/^ca-robotics-/, "ca-mlflow-");
+                    mlflow.hidden = false;
+                  }
+      </script>
     </div>
   </main>
   <footer>Prototype de validation, pas une plateforme de production. Les jeux de test sont synthétiques. Le navigateur communique uniquement avec le serveur sur 127.0.0.1.</footer>
@@ -153,8 +166,20 @@
       setBusy(button, true, "Traitement local…");
       try {
         const form = new FormData(); form.append("video", file);
-        const response = await fetch("/api/anonymize", {method:"POST",body:form});
-        if (!response.ok) { const error = await response.json(); throw new Error(error.error || "Traitement échoué."); }
+        const readJson = async r => { try { return await r.json(); } catch { return {error: `Erreur serveur (${r.status}).`}; } };
+        const start = await fetch("/api/anonymize", {method:"POST",body:form});
+        const started = await readJson(start);
+        if (!start.ok) throw new Error(started.error || "Traitement échoué.");
+        for (;;) {
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          const poll = await fetch("/api/anonymize/" + started.job_id), state = await readJson(poll);
+          if (!poll.ok) throw new Error(state.error || "Suivi du traitement impossible.");
+          if (state.status === "error") throw new Error(state.error || "Traitement échoué.");
+          if (state.status === "done") break;
+          status.textContent = "Traitement en cours… (peut durer plusieurs minutes)";
+        }
+        const response = await fetch(`/api/anonymize/${started.job_id}/result`);
+        if (!response.ok) throw new Error((await readJson(response)).error || "Téléchargement échoué.");
         const blob = await response.blob(), url = URL.createObjectURL(blob), link = document.createElement("a");
         link.href = url; link.download = file.name.replace(/\.[^.]+$/, "") + "_anonymisee.mp4"; link.click(); URL.revokeObjectURL(url);
         const detected = response.headers.get("X-Detected-Faces");

@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import uuid
 from email import policy
@@ -61,6 +62,14 @@ class Handler(BaseHTTPRequestHandler):
                 snapshot = ORCHESTRATOR.snapshot()
                 snapshot["logs"] = read_recent_logs(LOG_PATH)
                 self._send_json(snapshot)
+            elif path.startswith("/api/anonymize/"):
+                parts = path.split("/")
+                if len(parts) == 4:
+                    self._video_job_status(parts[3])
+                elif len(parts) == 5 and parts[4] == "result":
+                    self._video_job_result(parts[3])
+                else:
+                    raise RequestError(HTTPStatus.NOT_FOUND, "Not found")
             elif path == "/api/ml/status":
                 if MLOPS is None:
                     raise RequestError(HTTPStatus.SERVICE_UNAVAILABLE, "Service MLOps non démarré.")
@@ -163,12 +172,21 @@ class Handler(BaseHTTPRequestHandler):
 
     def _validate_local_origin(self) -> None:
         allowed_hosts = {"127.0.0.1:{}".format(PORT), "localhost:{}".format(PORT)}
-        if self.headers.get("Host", "") not in allowed_hosts:
-            raise RequestError(HTTPStatus.FORBIDDEN, "Cet endpoint accepte uniquement les hôtes locaux.")
+        allowed_hosts.update(
+            host.strip().lower()
+            for host in os.environ.get("ROBOTICS_DEMO_ALLOWED_HOSTS", "").split(",")
+            if host.strip()
+        )
+        if self.headers.get("Host", "").lower() not in allowed_hosts:
+            raise RequestError(HTTPStatus.FORBIDDEN, "Hôte non autorisé.")
         origin = self.headers.get("Origin")
-        allowed_origins = {"http://127.0.0.1:{}".format(PORT), "http://localhost:{}".format(PORT)}
-        if origin and origin not in allowed_origins:
-            raise RequestError(HTTPStatus.FORBIDDEN, "Origine non autorisée.")
+        if origin:
+            parsed_origin = urlparse(origin)
+            if (
+                parsed_origin.scheme not in {"http", "https"}
+                or parsed_origin.netloc.lower() not in allowed_hosts
+            ):
+                raise RequestError(HTTPStatus.FORBIDDEN, "Origine non autorisée.")
 
     def _read_body(self, limit: int) -> bytes:
         raw_length = self.headers.get("Content-Length", "")
@@ -280,13 +298,32 @@ class Handler(BaseHTTPRequestHandler):
         filename = Path(upload.get_filename() or "video.avi").name
         if Path(filename).suffix.lower() not in (".mp4", ".avi", ".mov", ".mkv"):
             raise RequestError(HTTPStatus.BAD_REQUEST, "Formats vidéo acceptés : MP4, AVI, MOV, MKV.")
-        output, frames, detections = anonymize_video(upload.get_payload(decode=True) or b"")
+        payload = upload.get_payload(decode=True) or b""
+        if not payload:
+            raise ValueError("La vidéo envoyée est vide.")
         safe_name = re.sub(r"[^A-Za-z0-9_.-]", "_", Path(filename).stem)[:80] or "video"
+        job_id = _start_video_job(payload, safe_name)
+        self._send_json({"job_id": job_id}, HTTPStatus.ACCEPTED)
+
+    def _video_job_status(self, job_id: str) -> None:
+        job = _get_video_job(job_id)
+        self._send_json({
+            "status": job["status"],
+            "error": job["error"],
+            "frames": job["frames"],
+            "faces": job["faces"],
+        })
+
+    def _video_job_result(self, job_id: str) -> None:
+        job = _get_video_job(job_id)
+        if job["status"] != "done":
+            raise RequestError(HTTPStatus.CONFLICT, "Traitement non terminé.")
+        output = job["output"]
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "video/mp4")
-        self.send_header("Content-Disposition", 'attachment; filename="{}_anonymisee.mp4"'.format(safe_name))
-        self.send_header("X-Processed-Frames", str(frames))
-        self.send_header("X-Detected-Faces", str(detections))
+        self.send_header("Content-Disposition", 'attachment; filename="{}_anonymisee.mp4"'.format(job["name"]))
+        self.send_header("X-Processed-Frames", str(job["frames"]))
+        self.send_header("X-Detected-Faces", str(job["faces"]))
         self.send_header("Content-Length", str(len(output)))
         self.end_headers()
         self.wfile.write(output)
@@ -340,7 +377,50 @@ def main() -> None:
         ORCHESTRATOR.stop()
 
 
+VIDEO_JOBS: dict[str, dict] = {}
+VIDEO_JOBS_LOCK = threading.Lock()
+VIDEO_JOB_TTL_SECONDS = 900
+
+
+def _start_video_job(payload: bytes, name: str) -> str:
+    now = time.monotonic()
+    job_id = uuid.uuid4().hex
+    job = {"status": "running", "error": None, "frames": 0, "faces": 0, "output": b"", "name": name, "updated": now}
+    with VIDEO_JOBS_LOCK:
+        for key in [k for k, v in VIDEO_JOBS.items() if v["status"] != "running" and now - v["updated"] > VIDEO_JOB_TTL_SECONDS]:
+            del VIDEO_JOBS[key]
+        if sum(1 for v in VIDEO_JOBS.values() if v["status"] == "running") >= 1:
+            raise RequestError(HTTPStatus.TOO_MANY_REQUESTS, "Un traitement vidéo est déjà en cours. Réessayez dans quelques instants.")
+        VIDEO_JOBS[job_id] = job
+
+    def run() -> None:
+        try:
+            output, frames, faces = anonymize_video(payload)
+            result = {"status": "done", "output": output, "frames": frames, "faces": faces}
+        except ValueError as error:
+            result = {"status": "error", "error": str(error)}
+        except Exception:
+            LOG.exception("video_job_failed", extra={"job_id": job_id})
+            result = {"status": "error", "error": "Traitement vidéo impossible. Consultez les journaux."}
+        with VIDEO_JOBS_LOCK:
+            job.update(result)
+            job["updated"] = time.monotonic()
+
+    threading.Thread(target=run, name="video-" + job_id[:8], daemon=True).start()
+    return job_id
+
+
+def _get_video_job(job_id: str) -> dict:
+    with VIDEO_JOBS_LOCK:
+        job = VIDEO_JOBS.get(job_id)
+    if job is None:
+        raise RequestError(HTTPStatus.NOT_FOUND, "Traitement introuvable ou expiré.")
+    return job
+
+
 def _route_label(path: str) -> str:
+    if path.startswith("/api/anonymize/"):
+        return "/api/anonymize/job"
     known_routes = {
         "/", "/api/health", "/api/operations", "/api/analyze", "/api/sample",
         "/api/anonymize", "/api/jobs/schedule", "/api/jobs/run", "/api/jobs/stop", "/metrics",
