@@ -6,7 +6,7 @@ import json
 import random
 import tempfile
 import zipfile
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -150,7 +150,103 @@ def analyze_text(content: str, suffix: str) -> Dict[str, Any]:
         "duration_avg_ms": round(sum(durations) / len(durations)) if durations else None,
         "quality_issues": quality_issues,
         "event_counts": dict(sorted(event_counts.items(), key=lambda item: (-item[1], item[0]))),
+        "incident_groups": _incident_groups(records),
+        "kpis": _kpis(records),
         "sample": records[:5],
+    }
+
+
+ERROR_EVENTS = ("error", "fault", "failure")
+ERROR_SEVERITIES = ("error", "critical", "fatal", "warning")
+
+
+def _is_incident(row: Dict[str, Any]) -> bool:
+    event = str(row.get("event", row.get("type", ""))).strip().lower()
+    severity = str(row.get("severity", "")).strip().lower()
+    return event in ERROR_EVENTS or severity in ERROR_SEVERITIES or bool(row.get("code"))
+
+
+def _parse_timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _incident_groups(records: List[Dict[str, Any]], limit: int = 10) -> List[Dict[str, Any]]:
+    """Group incidents by code (or message, or event) to show the most recurrent problems first."""
+    groups: Dict[str, Dict[str, Any]] = {}
+    for row in records:
+        if not _is_incident(row):
+            continue
+        key = str(row.get("code") or row.get("message") or row.get("event") or row.get("type") or "inconnu").strip()[:120]
+        group = groups.setdefault(key, {"key": key, "count": 0, "robots": set(), "first_seen": None, "last_seen": None})
+        group["count"] += 1
+        if row.get("robot_id") not in (None, ""):
+            group["robots"].add(str(row["robot_id"]))
+        stamp = _parse_timestamp(row.get("timestamp"))
+        if stamp is not None:
+            if group["first_seen"] is None or stamp < group["first_seen"]:
+                group["first_seen"] = stamp
+            if group["last_seen"] is None or stamp > group["last_seen"]:
+                group["last_seen"] = stamp
+    ranked = sorted(groups.values(), key=lambda item: (-item["count"], item["key"]))[:limit]
+    return [
+        {
+            "key": item["key"],
+            "count": item["count"],
+            "robots_affected": len(item["robots"]),
+            "first_seen": item["first_seen"].isoformat() if item["first_seen"] else None,
+            "last_seen": item["last_seen"].isoformat() if item["last_seen"] else None,
+        }
+        for item in ranked
+    ]
+
+
+def _kpis(records: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Service KPIs computed only from the provided rows (not an SLA)."""
+    per_robot: Dict[str, List[int]] = {}
+    per_day: Dict[str, List[int]] = {}
+    incident_times: List[datetime] = []
+    labelled = 0
+    anomalies = 0
+    for row in records:
+        incident = _is_incident(row)
+        robot = row.get("robot_id")
+        if robot not in (None, ""):
+            stats = per_robot.setdefault(str(robot), [0, 0])
+            stats[0] += 1
+            stats[1] += int(incident)
+        stamp = _parse_timestamp(row.get("timestamp"))
+        if stamp is not None:
+            day = per_day.setdefault(stamp.date().isoformat(), [0, 0])
+            day[0] += 1
+            day[1] += int(incident)
+            if incident:
+                incident_times.append(stamp)
+        label = _number(row.get("is_anomaly"))
+        if label is not None:
+            labelled += 1
+            anomalies += int(label == 1)
+    incident_times.sort()
+    gaps = [(b - a).total_seconds() / 60 for a, b in zip(incident_times, incident_times[1:])]
+    robots = sorted(
+        (
+            {"robot_id": name, "events": s[0], "incidents": s[1], "incident_rate_pct": round(100 * s[1] / s[0], 2)}
+            for name, s in per_robot.items()
+        ),
+        key=lambda item: (-item["incident_rate_pct"], -item["incidents"], item["robot_id"]),
+    )[:10]
+    return {
+        "mean_time_between_incidents_min": round(sum(gaps) / len(gaps), 1) if gaps else None,
+        "anomaly_rate_pct": round(100 * anomalies / labelled, 2) if labelled else None,
+        "worst_robots": robots,
+        "daily": [
+            {"day": day, "events": s[0], "incidents": s[1]} for day, s in sorted(per_day.items())[-14:]
+        ],
     }
 
 

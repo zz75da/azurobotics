@@ -259,6 +259,7 @@ class Handler(BaseHTTPRequestHandler):
                 "hyperparameters": request.get("hyperparameters"),
                 "description": request.get("description"),
                 "run_tags": request.get("tags"),
+                "tuning_results": _validate_tuning_results(request.get("tuning_results")),
             }
             if content is None:
                 self._send_json(MLOPS.train(None, **options))
@@ -361,6 +362,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def _send_file(self, path: Path, content_type: str) -> None:
         self._send_bytes(path.read_bytes(), content_type)
+
+
+def _validate_tuning_results(value: Any) -> list | None:
+    if value is None:
+        return None
+    if not isinstance(value, list) or len(value) > 500 or not all(isinstance(item, dict) for item in value):
+        raise ValueError("tuning_results doit être une liste d'au plus 500 objets.")
+    if len(json.dumps(value)) > 200_000:
+        raise ValueError("tuning_results est trop volumineux.")
+    return value
 
 
 def main() -> None:

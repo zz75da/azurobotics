@@ -120,6 +120,7 @@ def log_training_run(
     extra_tags: Dict[str, Any] | None = None,
     class_counts: Dict[int, int] | None = None,
     train_sample: Any = None,
+    extra_artifacts: Dict[str, Any] | None = None,
 ) -> str | None:
     """Best-effort MLflow logging; a tracking failure must never break training."""
     if not tracking_enabled():
@@ -133,8 +134,8 @@ def log_training_run(
         mlflow.set_experiment(EXPERIMENT_NAME)
         client = MlflowClient()
         status = "promoted" if promoted else "rejected"
-        summary = description or "Isolation Forest, {} ({} rows), {}: {}".format(
-            data_source, dataset_rows, status,
+        summary = description or "{}, {} ({} rows), {}: {}".format(
+            params.get("algorithm", "model"), data_source, dataset_rows, status,
             ", ".join("{}={}".format(k, metrics[k]) for k in ("roc_auc", "f1") if k in metrics),
         )
         rerun_config = {
@@ -166,6 +167,8 @@ def log_training_run(
                 **_user_tags(extra_tags),
             })
             mlflow.log_dict(rerun_config, "rerun_config.json")
+            for artifact_name, artifact_value in (extra_artifacts or {}).items():
+                mlflow.log_dict(artifact_value, artifact_name)
             mlflow.log_text(
                 build_model_card(model_name, version, summary, status, params, metrics, thresholds,
                                  data_source, dataset_rows, dataset_digest, class_counts),
@@ -194,7 +197,7 @@ def log_training_run(
                 client.set_registered_model_alias(model_name, CHAMPION_ALIAS, version_number)
                 # Optional metadata: the 3.1.x file store can fail to serialise model versions that carry metrics.
                 for call, args in (
-                    (client.update_registered_model, (model_name, "Isolation Forest anomaly detector for robot telemetry (features: {}).".format(params.get("features")))),
+                    (client.update_registered_model, (model_name, "{} anomaly detector for robot telemetry (features: {}).".format(params.get("algorithm", "Model"), params.get("features")))),
                     (client.set_model_version_tag, (model_name, version_number, "description", summary[:500])),
                     (client.set_model_version_tag, (model_name, version_number, "dataset_sha256", dataset_digest[:16])),
                 ):
