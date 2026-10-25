@@ -36,6 +36,33 @@ def test_auto_picks_best_candidate_and_records_both(tmp_path):
     assert result["status"] == "promoted"
 
 
+def test_tuned_random_forest_settings_are_applied(tmp_path):
+    service = _service(tmp_path)
+    result = service.train(
+        hyperparameters={
+            "algorithm": "random_forest",
+            "max_depth": 8,
+            "min_samples_leaf": 5,
+            "class_weight": None,
+            "max_features": 0.5,
+            "decision_threshold": 0.32,
+        },
+        tuning_results=[{"cv_f1": 0.5, "n_estimators": 10}],
+    )
+    model = mlops.joblib.load(tmp_path / "models" / (result["version"] + ".joblib"))["model"]
+    assert model.max_depth == 8 and model.min_samples_leaf == 5 and model.class_weight is None
+    assert model.decision_threshold == 0.32
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [{"max_depth": 0}, {"min_samples_leaf": 0}, {"class_weight": "x"}, {"decision_threshold": 1.5}],
+)
+def test_invalid_tuned_settings_are_rejected(tmp_path, bad):
+    with pytest.raises(ValueError):
+        _service(tmp_path).train(hyperparameters={"algorithm": "random_forest", **bad})
+
+
 def test_unknown_algorithm_is_rejected(tmp_path):
     with pytest.raises(ValueError, match="algorithm"):
         _service(tmp_path).train(hyperparameters={"algorithm": "xgboost"})
