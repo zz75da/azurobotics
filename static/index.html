@@ -158,6 +158,24 @@
         const total = document.createElement("span"); total.textContent = count; row.append(label, bar, total); target.append(row);
       }
       const note = document.createElement("p"); note.textContent = "Durée moyenne : " + (data.duration_avg_ms == null ? "—" : `${data.duration_avg_ms} ms`) + ` · Taux d’erreur : ${data.error_rate_pct}% (sur les événements fournis, pas un SLA).`; target.append(note);
+      const kpis = data.kpis || {};
+      const kpiNote = document.createElement("p");
+      kpiNote.textContent = "Temps moyen entre incidents : " + (kpis.mean_time_between_incidents_min == null ? "—" : `${kpis.mean_time_between_incidents_min} min`) + " · Taux d’anomalies étiquetées : " + (kpis.anomaly_rate_pct == null ? "—" : `${kpis.anomaly_rate_pct}%`) + ".";
+      target.append(kpiNote);
+      const groups = data.incident_groups || [];
+      if (groups.length) {
+        const title = document.createElement("h3"); title.textContent = "Incidents récurrents"; target.append(title);
+        const list = document.createElement("ul");
+        for (const group of groups) { const item = document.createElement("li"); item.textContent = `${group.key} — ${group.count} occurrence(s), ${group.robots_affected} robot(s)`; list.append(item); }
+        target.append(list);
+      }
+      const worst = kpis.worst_robots || [];
+      if (worst.length) {
+        const title = document.createElement("h3"); title.textContent = "Robots les plus touchés"; target.append(title);
+        const list = document.createElement("ul");
+        for (const robot of worst.slice(0, 5)) { const item = document.createElement("li"); item.textContent = `${robot.robot_id} — ${robot.incidents}/${robot.events} incidents (${robot.incident_rate_pct}%)`; list.append(item); }
+        target.append(list);
+      }
     }
     byId("anonymize").addEventListener("click", async event => {
       const file = byId("videoFile").files[0], status = byId("videoStatus"), button = event.currentTarget;

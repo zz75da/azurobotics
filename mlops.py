@@ -17,7 +17,7 @@ import pandas as pd
 from evidently import DataDefinition, Dataset, Report
 from evidently.presets import DataDriftPreset
 from evidently.ui.workspace import Workspace
-from sklearn.ensemble import IsolationForest
+from sklearn.ensemble import IsolationForest, RandomForestClassifier
 from sklearn.metrics import f1_score, precision_recall_curve, precision_score, recall_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 
@@ -38,13 +38,52 @@ MODEL_HISTORY_RETENTION = 100
 EVIDENTLY_RUN_RETENTION = 500
 PROMOTION_THRESHOLDS = {"roc_auc": 0.75, "f1": 0.5}
 LOG = logging.getLogger("robotics-demo.mlops")
+ALGORITHMS = ("isolation_forest", "random_forest", "auto")
 DEFAULT_HYPERPARAMETERS: Dict[str, Any] = {
+    "algorithm": "isolation_forest",
     "n_estimators": 150,
     "max_samples": "auto",
     "max_features": 1.0,
     "test_size": 0.25,
     "random_state": 42,
 }
+
+
+class RandomForestAnomalyDetector(RandomForestClassifier):
+    """Supervised classifier exposing the IsolationForest contract.
+
+    predict() returns -1 for an anomaly and 1 otherwise; decision_function() is higher for
+    normal rows. Prediction, threshold selection and MLflow code can treat both models alike.
+    """
+
+    def _anomaly_probability(self, X):
+        proba = self.predict_proba(X)
+        return proba[:, list(self.classes_).index(1)]
+
+    def predict(self, X):
+        return np.where(self._anomaly_probability(X) >= 0.5, -1, 1)
+
+    def decision_function(self, X):
+        return -self._anomaly_probability(X)
+
+
+def _build_model(algorithm: str, hp: Dict[str, Any], contamination: float):
+    if algorithm == "random_forest":
+        return RandomForestAnomalyDetector(
+            n_estimators=hp["n_estimators"],
+            max_features=hp["max_features"],
+            class_weight="balanced",
+            random_state=hp["random_state"],
+            n_jobs=1,
+        )
+    return IsolationForest(
+        n_estimators=hp["n_estimators"],
+        max_samples=hp["max_samples"],
+        max_features=hp["max_features"],
+        contamination=contamination,
+        random_state=hp["random_state"],
+        n_jobs=1,
+    )
 
 
 def _select_threshold(model: IsolationForest, train_x, train_y, test_x, test_y) -> Dict[str, float]:
@@ -81,6 +120,8 @@ def _validate_hyperparameters(overrides: Dict[str, Any] | None) -> Dict[str, Any
     if unknown:
         raise ValueError("Hyperparamètres inconnus : {}.".format(", ".join(sorted(unknown))))
     hp.update(overrides)
+    if hp["algorithm"] not in ALGORITHMS:
+        raise ValueError("algorithm doit valoir : {}.".format(", ".join(ALGORITHMS)))
     for name in ("n_estimators", "random_state"):
         if isinstance(hp[name], bool) or not isinstance(hp[name], int):
             raise ValueError("{} doit être un entier.".format(name))
@@ -191,16 +232,22 @@ class MLOpsService:
             random_state=hp["random_state"],
             stratify=labels,
         )
-        candidate = IsolationForest(
-            n_estimators=hp["n_estimators"],
-            max_samples=hp["max_samples"],
-            max_features=hp["max_features"],
-            contamination=contamination,
-            random_state=hp["random_state"],
-            n_jobs=1,
-        )
-        candidate.fit(train_x)
-        predicted = (candidate.predict(test_x) == -1).astype(int)
+        algorithms = ("isolation_forest", "random_forest") if hp["algorithm"] == "auto" else (hp["algorithm"],)
+        evaluated = []
+        for algorithm in algorithms:
+            model = _build_model(algorithm, hp, contamination)
+            model.fit(train_x, train_y) if algorithm == "random_forest" else model.fit(train_x)
+            model_predicted = (model.predict(test_x) == -1).astype(int)
+            evaluated.append(
+                (
+                    float(f1_score(test_y, model_predicted, zero_division=0)),
+                    float(roc_auc_score(test_y, -model.decision_function(test_x))),
+                    algorithm,
+                    model,
+                    model_predicted,
+                )
+            )
+        _, _, selected_algorithm, candidate, predicted = max(evaluated, key=lambda item: item[:2])
         anomaly_scores = -candidate.decision_function(test_x)
         metrics = {
             "roc_auc": round(float(roc_auc_score(test_y, anomaly_scores)), 4),
@@ -286,7 +333,9 @@ class MLOpsService:
             model_name=MODEL_NAME,
             params={
                 **{"model__" + k: v for k, v in candidate.get_params().items()},
-                "algorithm": "IsolationForest",
+                "algorithm": type(candidate).__name__,
+                "algorithm_requested": hp["algorithm"],
+                "algorithm_candidates": ",".join(item[2] for item in evaluated),
                 "contamination": round(contamination, 4),
                 "test_size": hp["test_size"],
                 "split_random_state": hp["random_state"],
