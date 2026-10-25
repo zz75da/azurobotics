@@ -1,7 +1,9 @@
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
-    GIT_PYTHON_REFRESH=quiet
+    GIT_PYTHON_REFRESH=quiet \
+    MLFLOW_ALLOW_FILE_STORE=true \
+    MLFLOW_SERVER_ALLOWED_HOSTS=*.azurecontainerapps.io,localhost,127.0.0.1
 
 RUN python -m pip install --no-cache-dir --disable-pip-version-check mlflow==3.17.2
 
