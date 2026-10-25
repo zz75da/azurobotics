@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt pytest
+      - run: python -m pytest -q
+
+  bicep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          az bicep build --file infra/main.bicep --stdout > /dev/null
+          az bicep build --file infra/mlflow.bicep --stdout > /dev/null
+          az bicep build --file infra/grafana.bicep --stdout > /dev/null
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t robotics-demo:ci .
+      - run: docker build -t mlflow-server:ci mlflow-server
+      - run: docker build -t grafana-robotics:ci --build-arg SUBSCRIPTION_ID=00000000-0000-0000-0000-000000000000 grafana

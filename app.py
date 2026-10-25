@@ -245,13 +245,24 @@ class Handler(BaseHTTPRequestHandler):
         if MLOPS is None:
             raise RequestError(HTTPStatus.SERVICE_UNAVAILABLE, "Service MLOps non démarré.")
         content = None
+        options: Dict[str, Any] = {}
         if body:
             try:
                 request = json.loads(body.decode("utf-8"))
-                content = request["content"]
-                filename = str(request["filename"])
-            except (KeyError, TypeError, json.JSONDecodeError) as error:
-                raise ValueError("Envoyez un CSV avec filename et content.") from error
+                if not isinstance(request, dict):
+                    raise TypeError
+                content = request.get("content")
+                filename = str(request.get("filename", "")) if content is not None else ""
+            except (TypeError, json.JSONDecodeError) as error:
+                raise ValueError("Corps JSON invalide.") from error
+            options = {
+                "hyperparameters": request.get("hyperparameters"),
+                "description": request.get("description"),
+                "run_tags": request.get("tags"),
+            }
+            if content is None:
+                self._send_json(MLOPS.train(None, **options))
+                return
             if not isinstance(content, str):
                 raise ValueError("Le contenu CSV doit être du texte.")
             if Path(filename).suffix.lower() != ".csv":

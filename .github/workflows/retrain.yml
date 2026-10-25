@@ -1,0 +1,51 @@
+name: Retrain
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      n_estimators:
+        description: Number of trees
+        default: "150"
+      random_state:
+        description: Random seed
+        default: "42"
+      description:
+        description: Run description stored in MLflow
+        default: ""
+  workflow_call:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: retrain
+  cancel-in-progress: false
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Train inside the app container (logs to MLflow on the shared volume)
+        env:
+          N_ESTIMATORS: ${{ inputs.n_estimators || '150' }}
+          RANDOM_STATE: ${{ inputs.random_state || '42' }}
+          RUN_DESCRIPTION: ${{ inputs.description || '' }}
+          TRIGGER: ${{ github.event_name }}
+        run: |
+          [[ "$N_ESTIMATORS" =~ ^[0-9]+$ && "$RANDOM_STATE" =~ ^[0-9]+$ ]] || { echo "numeric inputs required"; exit 1; }
+          desc="${RUN_DESCRIPTION:-Retrain via GitHub Actions (${TRIGGER})}"
+          desc_b64=$(printf '%s' "$desc" | base64 -w0)
+          py="import sys,base64;sys.path.insert(0,'/app');from pathlib import Path;from mlops import MLOpsService as M;d=base64.b64decode('${desc_b64}').decode();r=M(Path('/tmp/d.db'),Path('/tmp/a'),Path('/tmp/e')).train(None,hyperparameters={'n_estimators':${N_ESTIMATORS},'random_state':${RANDOM_STATE}},description=d,run_tags={'trigger':'github-actions','run_id':'${GITHUB_RUN_ID}','sha':'${GITHUB_SHA}'});print('RESULT',r['status'],r['mlflow_run_id'])"
+          py_b64=$(printf '%s' "$py" | base64 -w0)
+          out=$(az containerapp exec -g "${{ vars.AZURE_RESOURCE_GROUP }}" -n "${{ vars.AZURE_APP_NAME }}" \
+            --command "sh -c echo\${IFS}${py_b64}|base64\${IFS}-d|python\${IFS}-" 2>&1) || true
+          echo "$out" | grep -E 'RESULT|Error|Traceback' || true
+          echo "$out" | grep -q 'RESULT' || { echo "::error::training did not complete"; exit 1; }

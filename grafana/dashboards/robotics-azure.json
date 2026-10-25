@@ -13,7 +13,7 @@
       "targets": [{
         "refId": "A", "queryType": "Azure Monitor",
         "azureMonitor": {
-          "resources": [{ "subscription": "058fa6f0-94a9-4e5c-9bf4-bbeebad075b2", "resourceGroup": "rg-marso-dev-99ff", "metricNamespace": "microsoft.app/containerapps", "resourceName": "ca-robotics-dev-99ff" }],
+          "resources": [{ "subscription": "__SUBSCRIPTION_ID__", "resourceGroup": "rg-marso-dev-99ff", "metricNamespace": "microsoft.app/containerapps", "resourceName": "ca-robotics-dev-99ff" }],
           "metricNamespace": "microsoft.app/containerapps", "metricName": "Requests", "aggregation": "Total", "timeGrain": "auto",
           "dimensionFilters": [{ "dimension": "statusCodeCategory", "operator": "eq", "filters": ["*"] }]
         }
@@ -25,7 +25,7 @@
       "targets": [{
         "refId": "A", "queryType": "Azure Monitor",
         "azureMonitor": {
-          "resources": [{ "subscription": "058fa6f0-94a9-4e5c-9bf4-bbeebad075b2", "resourceGroup": "rg-marso-dev-99ff", "metricNamespace": "microsoft.app/containerapps", "resourceName": "ca-robotics-dev-99ff" }],
+          "resources": [{ "subscription": "__SUBSCRIPTION_ID__", "resourceGroup": "rg-marso-dev-99ff", "metricNamespace": "microsoft.app/containerapps", "resourceName": "ca-robotics-dev-99ff" }],
           "metricNamespace": "microsoft.app/containerapps", "metricName": "Replicas", "aggregation": "Maximum", "timeGrain": "auto"
         }
       }]
@@ -36,7 +36,7 @@
       "targets": [{
         "refId": "A", "queryType": "Azure Monitor",
         "azureMonitor": {
-          "resources": [{ "subscription": "058fa6f0-94a9-4e5c-9bf4-bbeebad075b2", "resourceGroup": "rg-marso-dev-99ff", "metricNamespace": "microsoft.app/containerapps", "resourceName": "ca-robotics-dev-99ff" }],
+          "resources": [{ "subscription": "__SUBSCRIPTION_ID__", "resourceGroup": "rg-marso-dev-99ff", "metricNamespace": "microsoft.app/containerapps", "resourceName": "ca-robotics-dev-99ff" }],
           "metricNamespace": "microsoft.app/containerapps", "metricName": "UsageNanoCores", "aggregation": "Average", "timeGrain": "auto"
         }
       }]
@@ -48,7 +48,7 @@
       "targets": [{
         "refId": "A", "queryType": "Azure Monitor",
         "azureMonitor": {
-          "resources": [{ "subscription": "058fa6f0-94a9-4e5c-9bf4-bbeebad075b2", "resourceGroup": "rg-marso-dev-99ff", "metricNamespace": "microsoft.app/containerapps", "resourceName": "ca-robotics-dev-99ff" }],
+          "resources": [{ "subscription": "__SUBSCRIPTION_ID__", "resourceGroup": "rg-marso-dev-99ff", "metricNamespace": "microsoft.app/containerapps", "resourceName": "ca-robotics-dev-99ff" }],
           "metricNamespace": "microsoft.app/containerapps", "metricName": "WorkingSetBytes", "aggregation": "Average", "timeGrain": "auto"
         }
       }]
@@ -59,7 +59,7 @@
       "targets": [{
         "refId": "A", "queryType": "Azure Log Analytics",
         "azureLogAnalytics": {
-          "resources": ["/subscriptions/058fa6f0-94a9-4e5c-9bf4-bbeebad075b2/resourceGroups/rg-marso-dev-99ff/providers/Microsoft.OperationalInsights/workspaces/log-marso-dev-99ff"],
+          "resources": ["/subscriptions/__SUBSCRIPTION_ID__/resourceGroups/rg-marso-dev-99ff/providers/Microsoft.OperationalInsights/workspaces/log-marso-dev-99ff"],
           "query": "ContainerAppConsoleLogs_CL | where ContainerAppName_s startswith 'ca-robotics' and Log_s !has 'api/health' | project TimeGenerated, Log_s | order by TimeGenerated desc | take 100",
           "resultFormat": "table"
         }
