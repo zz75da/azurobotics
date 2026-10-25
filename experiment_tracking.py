@@ -37,6 +37,72 @@ def _environment_tags() -> Dict[str, str]:
     return tags
 
 
+def build_model_card(
+    model_name: str,
+    version: str,
+    summary: str,
+    status: str,
+    params: Dict[str, Any],
+    metrics: Dict[str, float],
+    thresholds: Dict[str, float],
+    data_source: str,
+    dataset_rows: int,
+    dataset_digest: str,
+    class_counts: Dict[int, int] | None,
+) -> str:
+    model_params = "\n".join(
+        "- `{}`: {}".format(k.replace("model__", ""), v) for k, v in sorted(params.items()) if k.startswith("model__")
+    )
+    metric_rows = "\n".join("| {} | {} |".format(k, v) for k, v in sorted(metrics.items()))
+    gate = ", ".join("{} >= {}".format(k, v) for k, v in thresholds.items())
+    classes = ", ".join("class {}: {}".format(k, v) for k, v in sorted((class_counts or {}).items())) or "n/a"
+    return """---
+language: en
+library_name: scikit-learn
+tags: [anomaly-detection, isolation-forest, robotics, telemetry]
+---
+
+# {name}
+
+**Version:** {version}  
+**Status:** {status}  
+**Summary:** {summary}
+
+## Intended use
+Flag anomalous robot telemetry records (duration, battery level, position). Decision support for a prototype;
+not validated for safety-critical use.
+
+## Training data
+- Source: {source} ({rows} rows; {classes})
+- SHA-256: `{digest}`
+- Features: {features}
+- Raw data is not stored in MLflow; only the hash and row counts are recorded.
+
+## Model
+Isolation Forest (scikit-learn).
+
+{model_params}
+
+## Evaluation (held-out split)
+| Metric | Value |
+|---|---|
+{metric_rows}
+
+`*_tuned` metrics use an F1-optimal score threshold chosen on the training split (informational).
+
+## Promotion gate
+{gate}
+
+## Limitations
+Synthetic or user-provided CSVs only; metrics depend on label quality and the split seed.
+Retraining with the same hyperparameters, seed and dataset hash reproduces the run.
+""".format(
+        name=model_name, version=version, status=status, summary=summary, source=data_source,
+        rows=dataset_rows, classes=classes, digest=dataset_digest, features=params.get("features"),
+        model_params=model_params, metric_rows=metric_rows, gate=gate,
+    )
+
+
 def log_training_run(
     *,
     version: str,
@@ -100,6 +166,11 @@ def log_training_run(
                 **_user_tags(extra_tags),
             })
             mlflow.log_dict(rerun_config, "rerun_config.json")
+            mlflow.log_text(
+                build_model_card(model_name, version, summary, status, params, metrics, thresholds,
+                                 data_source, dataset_rows, dataset_digest, class_counts),
+                "MODEL_CARD.md",
+            )
             signature = input_example = None
             if train_sample is not None:
                 try:
