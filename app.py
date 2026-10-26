@@ -273,7 +273,7 @@ class Handler(BaseHTTPRequestHandler):
                     HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
                     "Fichier de données trop volumineux (limite : 25 Mo).",
                 )
-        self._send_json(MLOPS.train(content))
+        self._send_json(MLOPS.train(content, **options))
 
     def _predict(self, body: bytes) -> None:
         if MLOPS is None:

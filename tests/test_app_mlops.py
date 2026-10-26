@@ -62,6 +62,38 @@ def test_operations_polling_updates_metrics_without_appending_request_log(monkey
     assert logs == []
 
 
+def test_train_with_csv_passes_hyperparameters_and_options(monkeypatch):
+    calls = []
+
+    class FakeMlops:
+        def train(self, content, **options):
+            calls.append((content, options))
+            return {"status": "ok"}
+
+    handler = app.Handler.__new__(app.Handler)
+    sent = []
+    handler._send_json = sent.append
+    monkeypatch.setattr(app, "MLOPS", FakeMlops())
+    body = json.dumps(
+        {
+            "filename": "labelled.csv",
+            "content": "a,b\n1,2\n",
+            "hyperparameters": {"algorithm": "random_forest", "n_estimators": 300},
+            "description": "tuned",
+            "tags": {"source": "test"},
+        }
+    ).encode("utf-8")
+
+    handler._train_model(body)
+
+    content, options = calls[0]
+    assert content == "a,b\n1,2\n"
+    assert options["hyperparameters"] == {"algorithm": "random_forest", "n_estimators": 300}
+    assert options["description"] == "tuned"
+    assert options["run_tags"] == {"source": "test"}
+    assert sent == [{"status": "ok"}]
+
+
 def test_mlops_http_endpoints_train_predict_and_export_metrics(tmp_path):
     service = MLOpsService(
         tmp_path / "mlops.sqlite3",
