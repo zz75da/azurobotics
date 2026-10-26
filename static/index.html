@@ -112,12 +112,12 @@
           <button id="refreshMl">Actualiser l’état MLOps</button>
           <a id="grafanaLink" class="button" href="http://127.0.0.1:3000" target="_blank" rel="noreferrer">Grafana</a>
           <a id="mlflowLink" class="button" href="http://127.0.0.1:5000" target="_blank" rel="noreferrer" hidden>MLflow</a>
-          <a class="button local-only" href="http://127.0.0.1:8000" target="_blank" rel="noreferrer">Evidently</a>
+          <a id="evidentlyLink" class="button" href="http://127.0.0.1:8000" target="_blank" rel="noreferrer">Evidently</a>
         </div>
         <div id="mlStatus" class="status" aria-live="polite"></div>
         <div id="mlSummary" class="metrics"></div>
         <div id="mlResult" class="logs" aria-live="polite">Aucun modèle ni lot de prédiction.</div>
-        <p class="small">Chaque prédiction crée un rapport de dérive Evidently ; seuls les résultats sont enregistrés, pas les lignes brutes. <span class="local-only">Les liens Grafana et Evidently nécessitent la stack Docker Compose.</span><span id="cloudNote" hidden>Grafana et Evidently nécessitent la stack Docker Compose en local ; sur Azure, Grafana affiche les métriques Azure Monitor (premier chargement : environ 30 s) et Evidently n’est pas déployé.</span></p>
+        <p class="small">Chaque prédiction crée un rapport de dérive Evidently ; seuls les résultats sont enregistrés, pas les lignes brutes. <span class="local-only">Les liens Grafana et Evidently nécessitent la stack Docker Compose.</span><span id="cloudNote" hidden>Grafana et Evidently nécessitent la stack Docker Compose en local ; sur Azure, Grafana affiche les métriques Azure Monitor (premier chargement : environ 30 s) et Evidently affiche les rapports de dérive enregistrés sur le stockage partagé.</span></p>
       </section>
       <section class="wide" id="pipelinesSection" aria-labelledby="pipelinesTitle">
         <h2 id="pipelinesTitle">6 · Pipelines</h2>
@@ -140,6 +140,7 @@
                     const mlflow = document.getElementById("mlflowLink");
                     mlflow.href = "https://" + location.hostname.replace(/^ca-robotics-/, "ca-mlflow-");
                     mlflow.hidden = false;
+                    document.getElementById("evidentlyLink").href = "https://" + location.hostname.replace(/^ca-robotics-/, "ca-evidently-");
                   }
       </script>
     </div>

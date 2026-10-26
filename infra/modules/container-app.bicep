@@ -73,6 +73,11 @@ module app 'br/public:avm/res/app/container-app:0.23.0' = {
             name: 'MLFLOW_TRACKING_URI'
             value: 'file:/mnt/mlflow/mlruns'
           }
+          {
+            // Shared with the Evidently UI app (infra/evidently.bicep), which mounts the same share.
+            name: 'EVIDENTLY_WORKSPACE'
+            value: '/mnt/mlflow/evidently'
+          }
         ] : [])
         volumeMounts: mlflowEnabled ? [
           {

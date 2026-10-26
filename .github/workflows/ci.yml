@@ -43,6 +43,7 @@ jobs:
           az bicep build --file infra/main.bicep --stdout > /dev/null
           az bicep build --file infra/mlflow.bicep --stdout > /dev/null
           az bicep build --file infra/grafana.bicep --stdout > /dev/null
+          az bicep build --file infra/evidently.bicep --stdout > /dev/null
 
   docker:
     runs-on: ubuntu-latest

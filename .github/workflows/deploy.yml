@@ -24,6 +24,7 @@ env:
   APP_NAME: ${{ vars.AZURE_APP_NAME }}
   GRAFANA_APP_NAME: ${{ vars.AZURE_GRAFANA_APP_NAME }}
   MLFLOW_APP_NAME: ${{ vars.AZURE_MLFLOW_APP_NAME }}
+  EVIDENTLY_APP_NAME: ${{ vars.AZURE_EVIDENTLY_APP_NAME }}
 
 jobs:
   test:
@@ -75,6 +76,9 @@ jobs:
           az containerapp update -g "$RESOURCE_GROUP" -n "$MLFLOW_APP_NAME" \
             --image "${REGISTRY}.azurecr.io/mlflow-server:latest" --revision-suffix "$suffix" \
             --set-env-vars "MLFLOW_SERVER_CORS_ALLOWED_ORIGINS=https://${mlflow_fqdn}" -o none
+          if [ -n "$EVIDENTLY_APP_NAME" ]; then
+            az containerapp update -g "$RESOURCE_GROUP" -n "$EVIDENTLY_APP_NAME"               --image "${REGISTRY}.azurecr.io/robotics-demo:${GITHUB_SHA}" --revision-suffix "$suffix" -o none
+          fi
 
   smoke:
     needs: deploy
