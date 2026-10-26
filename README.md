@@ -83,6 +83,24 @@ L'entraînement exige une colonne `is_anomaly` contenant les classes 0 et 1. Le 
 
 L'ordonnanceur maison est délibérément limité à **un processus sur un seul PC** : il n'a ni retry configurable, ni exécution distribuée, ni gestion de dépendances de tâches, ni alerte externe. Il convient pour essayer les concepts sur Windows, pas pour coordonner des pipelines de production.
 
+### Panneau « 6 · Pipelines »
+
+Un panneau léger de type Airflow (sans Airflow) lance à la demande de petits graphes de tâches (`pipelines.py`) qui réutilisent le code existant, et affiche l'état de chaque tâche (en attente, en cours, réussi, échec, ignoré), les durées, les sorties et les métriques :
+
+| Pipeline | Tâches |
+| --- | --- |
+| `train_anomaly_model` | `validate_data` → `train` (suivi MLflow dans l'entraînement existant) → `evaluate` → `promote` |
+| `score_and_drift` | `validate_data` → `predict` → `drift_check` |
+| `analyze_logs` | `parse` → `incidents_kpis` |
+
+- `GET /api/pipelines` : définitions, paramètres, préréglages, dernière exécution. Le préréglage `Random Forest ajusté (AI4I)` reprend la meilleure ligne de `tools/results/ai4i_random_forest_sweep.json` et joint ce balayage comme artefact `tuning_results` quand un CSV étiqueté est fourni.
+- `POST /api/pipelines/<nom>/run` : corps `{params, filename?, content?}` (CSV/JSONL ≤ 25 Mo, paramètres validés par liste blanche). Une seule exécution à la fois : `409` si une autre est active. Une tâche en cours n'est pas annulable ; un délai maximal par exécution (30 min) ignore les tâches restantes.
+- `GET /api/pipelines/runs` et `GET /api/pipelines/runs/<id>` : historique et détail par tâche. Si une tâche échoue, ses descendantes sont `skipped` (`upstream_failed`). Les erreurs renvoyées sont assainies (pas de trace d'appel).
+- Métriques Prometheus : `robotics_pipeline_runs_total{pipeline,status}`, `robotics_pipeline_run_duration_seconds` et `robotics_pipeline_active`.
+- `MLFLOW_PUBLIC_URL` (http/https), si défini, ajoute un lien MLflow ; sinon seuls l'expérience et l'identifiant de run sont affichés.
+
+**Historique éphémère** : les 50 dernières exécutions sont gardées en mémoire et les 200 dernières dans `data/mlops.sqlite3` (table `pipeline_runs`). Sur Azure Container Apps, ce stockage est éphémère : l'historique est perdu à un redéploiement ou redémarrage, et une exécution interrompue est marquée en échec au redémarrage. Les tâches `evaluate` et `promote` rapportent le résultat de l'entraînement existant (la promotion est décidée dans `MLOpsService.train`).
+
 ## Formats et traitement
 
 - CSV avec colonnes recommandées `timestamp`, `robot_id`, `event`, `duration_ms`, `battery_pct`, `x_m`, `y_m`.

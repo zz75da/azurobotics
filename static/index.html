@@ -38,6 +38,25 @@
     .notice { border-left:3px solid var(--warn); padding:9px 12px; background:#28251d; color:#e9d6a6; font-size:13px }
     .status { min-height:24px; color:var(--muted); margin-top:10px }
     footer { max-width:1150px; margin:auto; padding:0 20px 25px; color:var(--muted); font-size:12px }
+    .pipeline-card { border:1px solid var(--line); border-radius:10px; padding:14px; margin:14px 0; background:#141c25 }
+    .pipeline-card h3 { margin:0 0 4px }
+    .dag { display:flex; flex-wrap:wrap; align-items:stretch; gap:6px; list-style:none; padding:0; margin:10px 0 }
+    .dag li { display:flex; align-items:center; gap:6px }
+    .task-node { min-width:130px; padding:8px 10px; border:2px solid var(--line); border-radius:8px; background:#101820; font-size:13px }
+    .task-node span { display:block; color:var(--muted); font-size:12px }
+    .task-node[data-status="running"] { border-color:var(--warn) }
+    .task-node[data-status="success"] { border-color:var(--accent) }
+    .task-node[data-status="failed"] { border-color:#ff7b7b }
+    .task-node[data-status="skipped"] { border-style:dashed; opacity:.75 }
+    .dag-arrow { color:var(--muted); font-size:18px }
+    .form-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:10px; margin:10px 0 }
+    .form-grid label { display:block; font-size:12px; color:var(--muted) }
+    .form-grid input,.form-grid select { width:100%; margin-top:3px }
+    .table-wrap { overflow-x:auto }
+    table { width:100%; border-collapse:collapse; font-size:13px }
+    th,td { text-align:left; padding:7px 8px; border-top:1px solid var(--line) }
+    th { color:var(--muted); font-weight:600 }
+    button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible,#runDetail:focus-visible { outline:2px solid var(--warn); outline-offset:2px }
     @media(max-width:700px) { .grid { grid-template-columns:1fr } .wide { grid-column:auto } .metrics { grid-template-columns:repeat(2,1fr) } }
   </style>
 </head>
@@ -99,6 +118,18 @@
         <div id="mlSummary" class="metrics"></div>
         <div id="mlResult" class="logs" aria-live="polite">Aucun modèle ni lot de prédiction.</div>
         <p class="small">Chaque prédiction crée un rapport de dérive Evidently ; seuls les résultats sont enregistrés, pas les lignes brutes. <span class="local-only">Les liens Grafana et Evidently nécessitent la stack Docker Compose.</span><span id="cloudNote" hidden>Grafana et Evidently nécessitent la stack Docker Compose en local ; sur Azure, Grafana affiche les métriques Azure Monitor (premier chargement : environ 30 s) et Evidently n’est pas déployé.</span></p>
+      </section>
+      <section class="wide" id="pipelinesSection" aria-labelledby="pipelinesTitle">
+        <h2 id="pipelinesTitle">6 · Pipelines</h2>
+        <p>Panneau de contrôle léger de type Airflow : lancez manuellement un pipeline (graphe de tâches) qui réutilise le code existant, suivez l’état de chaque tâche et consultez ses métriques. Une seule exécution à la fois ; une tâche en cours ne peut pas être annulée.</p>
+        <div class="notice">L’historique des exécutions est enregistré dans SQLite sur le stockage du conteneur, qui est éphémère : il peut être perdu lors d’un redéploiement ou d’un redémarrage.</div>
+        <div class="row" style="margin-top:13px"><button id="refreshPipelines" type="button">Actualiser les pipelines</button><span id="mlflowPipelineLink"></span></div>
+        <div id="pipelinesStatus" class="status" aria-live="polite"></div>
+        <div id="pipelineList"></div>
+        <h3>Historique des exécutions</h3>
+        <div class="table-wrap"><table id="runHistory"><caption class="small">Dernières exécutions (50 maximum)</caption><thead><tr><th scope="col">Identifiant</th><th scope="col">Pipeline</th><th scope="col">Statut</th><th scope="col">Début</th><th scope="col">Durée</th><th scope="col">Déclenchement</th><th scope="col">Métriques clés</th><th scope="col">Détail</th></tr></thead><tbody></tbody></table></div>
+        <h3>Détail de l’exécution</h3>
+        <div id="runDetail" class="logs" tabindex="-1" aria-live="polite">Sélectionnez une exécution.</div>
       </section>
       <script>
         if (!["localhost", "127.0.0.1"].includes(location.hostname)) {
@@ -313,7 +344,204 @@
       finally { setBusy(button, false); }
     });
     byId("refreshMl").addEventListener("click", refreshMlOps);
-    refreshOperations(); refreshMlOps(); window.setInterval(refreshOperations, 5000);
+    // pipelines:begin
+    const STATUS_LABELS = {pending:"en attente", running:"en cours", success:"réussi", failed:"échec", skipped:"ignoré"};
+    const pipelineState = {defs:null, forms:new Map(), timer:null, selected:null, busy:false};
+    const statusLabel = value => STATUS_LABELS[value] || String(value);
+    const elementWith = (tag, text, className) => { const node = document.createElement(tag); if (text != null) node.textContent = text; if (className) node.className = className; return node; };
+    const fmtDuration = seconds => seconds == null ? "—" : `${Number(seconds).toFixed(seconds < 10 ? 2 : 1)} s`;
+    const fmtTime = value => value ? new Date(value).toLocaleString("fr-FR") : "—";
+    function fmtSummary(summary) {
+      const parts = [];
+      if (summary.f1 != null) parts.push(`F1 ${summary.f1}`);
+      if (summary.roc_auc != null) parts.push(`AUC ${summary.roc_auc}`);
+      if (summary.promotion) parts.push(`modèle ${summary.promotion}`);
+      if (summary.records != null) parts.push(`${summary.records} lignes`);
+      if (summary.anomaly_rate_pct != null) parts.push(`anomalies ${summary.anomaly_rate_pct}%`);
+      if (summary.events_total != null) parts.push(`${summary.events_total} événements`);
+      if (summary.errors_total != null) parts.push(`${summary.errors_total} erreurs`);
+      if (summary.incident_groups != null) parts.push(`${summary.incident_groups} groupes d’incidents`);
+      return parts.join(" · ") || "—";
+    }
+    async function pipelineRequest(url, options) {
+      const response = await fetch(url, options);
+      let data = {};
+      try { data = await response.json(); } catch { data = {}; }
+      if (!response.ok) { const error = new Error(data.error || `Erreur serveur (${response.status}).`); error.status = response.status; throw error; }
+      return data;
+    }
+    function renderDag(container, definition, run) {
+      container.replaceChildren();
+      const states = new Map((run ? run.tasks : []).map(task => [task.id, task.status]));
+      definition.tasks.forEach((task, index) => {
+        const item = document.createElement("li");
+        const node = elementWith("div", null, "task-node");
+        node.dataset.status = states.get(task.id) || "pending";
+        node.append(elementWith("strong", task.label), elementWith("span", run ? statusLabel(node.dataset.status) : "jamais exécuté"));
+        if (task.depends_on.length) node.append(elementWith("span", "après : " + task.depends_on.join(", ")));
+        item.append(node);
+        if (index < definition.tasks.length - 1) { const arrow = elementWith("span", "→", "dag-arrow"); arrow.setAttribute("aria-hidden", "true"); item.append(arrow); }
+        container.append(item);
+      });
+    }
+    function labelledField(id, label, control) {
+      const wrapper = document.createElement("label"); wrapper.htmlFor = id; wrapper.append(document.createTextNode(label)); control.id = id; wrapper.append(control); return wrapper;
+    }
+    function buildPipelineCard(definition, defs) {
+      const card = elementWith("article", null, "pipeline-card");
+      const titleId = `pipeline-${definition.name}-title`;
+      card.setAttribute("aria-labelledby", titleId);
+      const title = elementWith("h3", definition.title); title.id = titleId;
+      const dag = elementWith("ol", null, "dag"); dag.setAttribute("aria-label", `Graphe des tâches : ${definition.title}`);
+      const form = document.createElement("form"); form.noValidate = true;
+      const fields = {};
+      const grid = elementWith("div", null, "form-grid");
+      if (definition.kind === "train") {
+        const preset = document.createElement("select");
+        for (const item of defs.presets) { const option = elementWith("option", item.label); option.value = item.id; preset.append(option); }
+        const algorithm = document.createElement("select");
+        for (const name of defs.algorithms) { const option = elementWith("option", name); option.value = name; algorithm.append(option); }
+        const classWeight = document.createElement("select");
+        for (const [value, text] of [["", "aucun"], ["balanced", "balanced"], ["balanced_subsample", "balanced_subsample"]]) { const option = elementWith("option", text); option.value = value; classWeight.append(option); }
+        const number = (step, min, max) => { const input = document.createElement("input"); input.type = "number"; input.step = step; input.min = min; input.max = max; return input; };
+        Object.assign(fields, {preset, algorithm, n_estimators:number("1", "10", "1000"), max_depth:number("1", "1", "50"), min_samples_leaf:number("1", "1", "100"), class_weight:classWeight, max_features:number("0.05", "0.05", "1"), decision_threshold:number("0.01", "0.05", "0.95")});
+        fields.max_depth.placeholder = "illimitée";
+        const description = document.createElement("input"); description.type = "text"; description.maxLength = 500; fields.description = description;
+        const key = definition.name;
+        grid.append(
+          labelledField(`${key}-preset`, "Préréglage", preset), labelledField(`${key}-algorithm`, "Algorithme", algorithm),
+          labelledField(`${key}-n_estimators`, "n_estimators", fields.n_estimators), labelledField(`${key}-max_depth`, "max_depth", fields.max_depth),
+          labelledField(`${key}-min_samples_leaf`, "min_samples_leaf", fields.min_samples_leaf), labelledField(`${key}-class_weight`, "class_weight", classWeight),
+          labelledField(`${key}-max_features`, "max_features", fields.max_features), labelledField(`${key}-decision_threshold`, "decision_threshold", fields.decision_threshold),
+          labelledField(`${key}-description`, "Description (facultatif)", description)
+        );
+        const applyPreset = () => {
+          const chosen = defs.presets.find(item => item.id === preset.value);
+          const values = Object.assign({}, defs.default_hyperparameters, chosen ? chosen.hyperparameters : {});
+          algorithm.value = values.algorithm;
+          for (const name of ["n_estimators", "max_depth", "min_samples_leaf", "max_features", "decision_threshold"]) fields[name].value = values[name] == null ? "" : values[name];
+          classWeight.value = values.class_weight == null ? "" : values.class_weight;
+        };
+        preset.addEventListener("change", applyPreset); applyPreset();
+      }
+      const file = document.createElement("input"); file.type = "file"; file.accept = definition.accepted_suffixes.join(","); fields.file = file;
+      const fileLabel = labelledField(`${definition.name}-file`, `Fichier (${definition.accepted_suffixes.join(", ")}, ${defs.max_file_mb} Mo max, facultatif : sinon données synthétiques)`, file);
+      const submit = elementWith("button", "Lancer"); submit.type = "submit";
+      const note = elementWith("div", null, "status"); note.setAttribute("aria-live", "polite");
+      const actions = elementWith("div", null, "row"); actions.append(submit);
+      form.append(grid, fileLabel, actions, note);
+      form.addEventListener("submit", event => { event.preventDefault(); launchPipeline(definition, fields, submit, note); });
+      card.append(title, elementWith("p", definition.description), dag, form);
+      pipelineState.forms.set(definition.name, {dag, submit, note, definition});
+      return card;
+    }
+    function readTrainParams(fields) {
+      const numeric = (name, integer) => {
+        const raw = fields[name].value.trim();
+        if (raw === "") { if (name === "max_depth") return null; throw new Error(`${name} est requis.`); }
+        const value = Number(raw);
+        if (!Number.isFinite(value) || (integer && !Number.isInteger(value))) throw new Error(`${name} doit être un nombre${integer ? " entier" : ""}.`);
+        return value;
+      };
+      return {
+        preset: fields.preset.value, algorithm: fields.algorithm.value, description: fields.description.value,
+        hyperparameters: {
+          n_estimators: numeric("n_estimators", true), max_depth: numeric("max_depth", true), min_samples_leaf: numeric("min_samples_leaf", true),
+          class_weight: fields.class_weight.value || null, max_features: numeric("max_features", false), decision_threshold: numeric("decision_threshold", false)
+        }
+      };
+    }
+    async function launchPipeline(definition, fields, button, note) {
+      const status = byId("pipelinesStatus");
+      setBusy(button, true, "Lancement…");
+      try {
+        const body = {params: definition.kind === "train" ? readTrainParams(fields) : {}};
+        const file = fields.file.files[0];
+        if (file) {
+          if (file.size > pipelineState.defs.max_file_mb * 1024 * 1024) throw new Error(`Limite de taille : ${pipelineState.defs.max_file_mb} Mo.`);
+          body.filename = file.name; body.content = await file.text();
+        }
+        const run = await pipelineRequest(`/api/pipelines/${encodeURIComponent(definition.name)}/run`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+        note.textContent = `Exécution ${run.id} démarrée.`;
+        status.textContent = `Pipeline ${definition.name} démarré (exécution ${run.id}).`;
+        pipelineState.selected = run.id;
+        await refreshPipelineRuns(); startPipelinePolling();
+      } catch (error) { note.textContent = error.message; status.textContent = error.message; }
+      finally { setBusy(button, false); }
+    }
+    function renderHistory(runs) {
+      const body = byId("runHistory").tBodies[0]; body.replaceChildren();
+      if (!runs.length) { const row = body.insertRow(), cell = row.insertCell(); cell.colSpan = 8; cell.textContent = "Aucune exécution."; return; }
+      for (const run of runs) {
+        const row = body.insertRow();
+        const values = [run.id, run.pipeline, statusLabel(run.status), fmtTime(run.started_at || run.created_at), fmtDuration(run.duration_seconds), run.trigger === "manual" ? "manuel" : run.trigger, fmtSummary(run.summary || {})];
+        for (const value of values) row.insertCell().textContent = value;
+        const button = elementWith("button", "Détails"); button.type = "button"; button.setAttribute("aria-label", `Détails de l’exécution ${run.id}`);
+        button.addEventListener("click", () => { pipelineState.selected = run.id; showRunDetail(run.id, true); });
+        row.insertCell().append(button);
+      }
+    }
+    function renderDetail(run, focus) {
+      const target = byId("runDetail"); target.replaceChildren();
+      target.append(elementWith("div", `Exécution ${run.id} · ${run.pipeline} · ${statusLabel(run.status)} · ${fmtDuration(run.duration_seconds)} · début ${fmtTime(run.started_at)}`));
+      if (run.error) target.append(elementWith("div", `Erreur : ${run.error}`));
+      const p = run.params || {};
+      target.append(elementWith("div", `Paramètres : jeu ${p.dataset === "uploaded" ? "importé" : "synthétique"}${p.filename ? ` (${p.filename}, ${p.content_bytes} octets)` : ""}${p.preset ? ` · préréglage ${p.preset}` : ""}${p.hyperparameters ? ` · ${JSON.stringify(p.hyperparameters)}` : ""}${p.description ? ` · ${p.description}` : ""}`));
+      const mlflowId = (run.summary || {}).mlflow_run_id;
+      if (mlflowId) {
+        const line = elementWith("div", `MLflow · expérience ${pipelineState.defs.mlflow.experiment} · run ${mlflowId} `);
+        const url = pipelineState.defs.mlflow.url;
+        if (url && /^https?:\/\//.test(url)) { const link = elementWith("a", "Ouvrir MLflow"); link.href = url; link.target = "_blank"; link.rel = "noreferrer"; line.append(link); }
+        target.append(line);
+      }
+      for (const task of run.tasks) {
+        const outputs = Object.entries(task.outputs || {}).map(([key, value]) => `${key}=${value}`).join(", ");
+        const reason = task.error === "upstream_failed" ? "ignorée : tâche amont en échec" : task.error;
+        target.append(elementWith("div", `• ${task.label} — ${statusLabel(task.status)} · ${fmtDuration(task.duration_seconds)}${reason ? ` · ${reason}` : ""}${outputs ? ` · ${outputs}` : ""}`));
+      }
+      if (focus) target.focus();
+    }
+    async function showRunDetail(id, focus) {
+      try { renderDetail(await pipelineRequest(`/api/pipelines/runs/${encodeURIComponent(id)}`), focus); }
+      catch (error) { byId("runDetail").textContent = error.message; }
+    }
+    async function refreshPipelineRuns() {
+      const {runs} = await pipelineRequest("/api/pipelines/runs");
+      renderHistory(runs);
+      for (const {dag, definition} of pipelineState.forms.values()) renderDag(dag, definition, runs.find(run => run.pipeline === definition.name));
+      const active = runs.some(run => run.status === "pending" || run.status === "running");
+      for (const {submit} of pipelineState.forms.values()) submit.disabled = active;
+      const target = pipelineState.selected || (runs[0] && runs[0].id);
+      if (target) await showRunDetail(target, false);
+      return active;
+    }
+    function startPipelinePolling() {
+      if (pipelineState.timer) return;
+      const tick = async () => {
+        let active = false;
+        try { active = await refreshPipelineRuns(); } catch (error) { byId("pipelinesStatus").textContent = error.message; }
+        if (active) pipelineState.timer = window.setTimeout(tick, 2000);
+        else { pipelineState.timer = null; byId("pipelinesStatus").textContent = "Aucune exécution en cours."; }
+      };
+      pipelineState.timer = window.setTimeout(tick, 2000);
+    }
+    async function loadPipelines() {
+      const status = byId("pipelinesStatus");
+      try {
+        const defs = await pipelineRequest("/api/pipelines");
+        pipelineState.defs = defs; pipelineState.forms.clear();
+        const list = byId("pipelineList"); list.replaceChildren();
+        for (const definition of defs.pipelines) list.append(buildPipelineCard(definition, defs));
+        const link = byId("mlflowPipelineLink"); link.replaceChildren();
+        if (defs.mlflow.url && /^https?:\/\//.test(defs.mlflow.url)) { const anchor = elementWith("a", "MLflow", "button"); anchor.href = defs.mlflow.url; anchor.target = "_blank"; anchor.rel = "noreferrer"; link.append(anchor); }
+        else if (defs.mlflow.enabled) link.textContent = `Suivi MLflow actif · expérience ${defs.mlflow.experiment}`;
+        const active = await refreshPipelineRuns();
+        if (active) startPipelinePolling();
+      } catch (error) { status.textContent = error.message; }
+    }
+    byId("refreshPipelines").addEventListener("click", async () => { try { if (await refreshPipelineRuns()) startPipelinePolling(); } catch (error) { byId("pipelinesStatus").textContent = error.message; } });
+    // pipelines:end
+    refreshOperations(); refreshMlOps(); loadPipelines(); window.setInterval(refreshOperations, 5000);
   </script>
 </body>
 </html>
