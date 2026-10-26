@@ -1,0 +1,521 @@
+{
+  "clip_builder_version": "2.0",
+  "config": {
+    "detector": "scrfd",
+    "fps": 12,
+    "hold_frames": 3,
+    "hold_seconds": 0.25,
+    "inflation_per_miss": 0.0,
+    "margins": {
+      "bottom": 0.25,
+      "top": 0.25,
+      "x": 0.2
+    },
+    "nms": 0.35,
+    "threshold": 0.45,
+    "tile_grid": 2,
+    "tile_overlap": 0.33333333333333326,
+    "tile_scale": 0.6,
+    "tracker": "current"
+  },
+  "dataset": {
+    "annotation_revision": "db171f1b7fedf4d3453e81297ff02f9915356d19",
+    "annotation_sha256": "753a8c0591cc570a793bb7fd2de4db6e5357bb1abbe863d8739d586369e32d9d",
+    "clips": 28,
+    "dataset_version": "WIDER FACE train bounding-box/attribute annotations; public HF mirror",
+    "frames": 64,
+    "image_revision": "04cab2dc3e18be03e2935b731c1dfa9eb29a31b5",
+    "source": "WIDER FACE train annotations and public still-image mirror; synthetic clips (proxy)",
+    "source_images": 8,
+    "source_manifest_sha256": "72bc9d35782529b85435ae70b1235c72912e85c567653bf6cd343c9a388a85c7"
+  },
+  "empty_frames": 16,
+  "failure_count_r90": 22,
+  "failure_frames_saved": 0,
+  "failures": [
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "88a2da126490",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "88a2da126490",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "88a2da126490",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "low_light",
+        "motion_blur"
+      ],
+      "clip_id_hash": "b1b4209733b0",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "low_light",
+        "motion_blur"
+      ],
+      "clip_id_hash": "b1b4209733b0",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "low_light",
+        "motion_blur"
+      ],
+      "clip_id_hash": "b1b4209733b0",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "low_light",
+        "motion_blur"
+      ],
+      "clip_id_hash": "b1b4209733b0",
+      "coverage": 0.0,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "low_light",
+        "motion_blur"
+      ],
+      "clip_id_hash": "b1b4209733b0",
+      "coverage": 0.0,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "low_light",
+        "motion_blur"
+      ],
+      "clip_id_hash": "b1b4209733b0",
+      "coverage": 0.0,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "31bfe2eb51f3",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "31bfe2eb51f3",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "31bfe2eb51f3",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "31bfe2eb51f3",
+      "coverage": 0.0,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "31bfe2eb51f3",
+      "coverage": 0.0,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "31bfe2eb51f3",
+      "coverage": 0.0,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "a042667e2c9a",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "a042667e2c9a",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "a042667e2c9a",
+      "coverage": 0.0,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "a042667e2c9a",
+      "coverage": 0.0,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "459a72b8ae62",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "459a72b8ae62",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "459a72b8ae62",
+      "coverage": 0.0,
+      "frame": 0
+    }
+  ],
+  "false_mask_frames": 13,
+  "false_mask_rate": 0.8125,
+  "frame_count": 64,
+  "git_commit": "14d7a9425699a55246bc3155c6bcee3f4901ee1a",
+  "masked_area_fraction": 0.5163007693830934,
+  "metrics": {
+    "face_size_large": {
+      "0.5": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 120
+      },
+      "0.9": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 120
+      },
+      "1.0": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 120
+      }
+    },
+    "face_size_medium": {
+      "0.5": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 88
+      },
+      "0.9": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 88
+      },
+      "1.0": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 88
+      }
+    },
+    "face_size_small": {
+      "0.5": {
+        "ci95": [
+          0.07258064516129033,
+          0.22882238700564972
+        ],
+        "exposed": 22,
+        "r_exposed": 0.1527777777777778,
+        "visible_face_frames": 144
+      },
+      "0.9": {
+        "ci95": [
+          0.07140066964285714,
+          0.2285774818401937
+        ],
+        "exposed": 22,
+        "r_exposed": 0.1527777777777778,
+        "visible_face_frames": 144
+      },
+      "1.0": {
+        "ci95": [
+          0.07375549780087964,
+          0.22609099804305277
+        ],
+        "exposed": 22,
+        "r_exposed": 0.1527777777777778,
+        "visible_face_frames": 144
+      }
+    },
+    "low_light": {
+      "0.5": {
+        "ci95": [
+          0.0,
+          0.13486976506639425
+        ],
+        "exposed": 6,
+        "r_exposed": 0.06818181818181818,
+        "visible_face_frames": 88
+      },
+      "0.9": {
+        "ci95": [
+          0.0,
+          0.13956213662790695
+        ],
+        "exposed": 6,
+        "r_exposed": 0.06818181818181818,
+        "visible_face_frames": 88
+      },
+      "1.0": {
+        "ci95": [
+          0.0,
+          0.13846153846153847
+        ],
+        "exposed": 6,
+        "r_exposed": 0.06818181818181818,
+        "visible_face_frames": 88
+      }
+    },
+    "motion_blur": {
+      "0.5": {
+        "ci95": [
+          0.031243086283185843,
+          0.12122235872235872
+        ],
+        "exposed": 22,
+        "r_exposed": 0.08208955223880597,
+        "visible_face_frames": 268
+      },
+      "0.9": {
+        "ci95": [
+          0.03211248159057437,
+          0.12333333333333334
+        ],
+        "exposed": 22,
+        "r_exposed": 0.08208955223880597,
+        "visible_face_frames": 268
+      },
+      "1.0": {
+        "ci95": [
+          0.030919945297706714,
+          0.12308641975308642
+        ],
+        "exposed": 22,
+        "r_exposed": 0.08208955223880597,
+        "visible_face_frames": 268
+      }
+    },
+    "occlusion": {
+      "0.5": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 80
+      },
+      "0.9": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 80
+      },
+      "1.0": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 80
+      }
+    },
+    "overall": {
+      "0.5": {
+        "ci95": [
+          0.02142857142857143,
+          0.10227688470066519
+        ],
+        "exposed": 22,
+        "r_exposed": 0.0625,
+        "visible_face_frames": 352
+      },
+      "0.9": {
+        "ci95": [
+          0.021871603260869565,
+          0.0989285714285714
+        ],
+        "exposed": 22,
+        "r_exposed": 0.0625,
+        "visible_face_frames": 352
+      },
+      "1.0": {
+        "ci95": [
+          0.018981408227848103,
+          0.09960365853658536
+        ],
+        "exposed": 22,
+        "r_exposed": 0.0625,
+        "visible_face_frames": 352
+      }
+    },
+    "pose_profile": {
+      "0.5": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 56
+      },
+      "0.9": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 56
+      },
+      "1.0": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 56
+      }
+    },
+    "scene_transition": {
+      "0.5": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 14
+      },
+      "0.9": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 14
+      },
+      "1.0": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 14
+      }
+    }
+  },
+  "ms_per_frame": 385.37011876564975,
+  "over_masking_area_fraction": 0.47576548439513777,
+  "proxy_data": true,
+  "schema_version": 1,
+  "seed": 20261025,
+  "split": "tune",
+  "step": "tune",
+  "weights": {
+    "path_name": "det_500m.onnx",
+    "sha256": "5e4447f50245bbd7966bd6c0fa52938c61474a04ec7def48753668a9d8b4ea3a",
+    "source": "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_sc.zip (det_500m.onnx)"
+  }
+}

@@ -1,0 +1,316 @@
+{
+  "clip_builder_version": "2.0",
+  "config": {
+    "detector": "scrfd",
+    "fps": 12,
+    "hold_frames": 9,
+    "hold_seconds": 0.25,
+    "inflation_per_miss": 0.05,
+    "margins": {
+      "bottom": 0.25,
+      "top": 0.25,
+      "x": 0.2
+    },
+    "nms": 0.35,
+    "threshold": 0.25,
+    "tile_grid": 3,
+    "tile_overlap": 0.25,
+    "tile_scale": 0.7,
+    "tracker": "current"
+  },
+  "dataset": {
+    "annotation_revision": "db171f1b7fedf4d3453e81297ff02f9915356d19",
+    "annotation_sha256": "753a8c0591cc570a793bb7fd2de4db6e5357bb1abbe863d8739d586369e32d9d",
+    "clips": 14,
+    "dataset_version": "WIDER FACE train bounding-box/attribute annotations; public HF mirror",
+    "frames": 32,
+    "image_revision": "04cab2dc3e18be03e2935b731c1dfa9eb29a31b5",
+    "source": "WIDER FACE train annotations and public still-image mirror; synthetic clips (proxy)",
+    "source_images": 4,
+    "source_manifest_sha256": "72bc9d35782529b85435ae70b1235c72912e85c567653bf6cd343c9a388a85c7"
+  },
+  "empty_frames": 16,
+  "failure_count_r90": 0,
+  "failure_frames_saved": 0,
+  "failures": [],
+  "false_mask_frames": 16,
+  "false_mask_rate": 1.0,
+  "frame_count": 32,
+  "git_commit": "14d7a9425699a55246bc3155c6bcee3f4901ee1a",
+  "masked_area_fraction": 0.4862533253401301,
+  "metrics": {
+    "face_size_large": {
+      "0.5": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 24
+      },
+      "0.9": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 24
+      },
+      "1.0": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 24
+      }
+    },
+    "face_size_medium": {
+      "0.5": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 48
+      },
+      "0.9": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 48
+      },
+      "1.0": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 48
+      }
+    },
+    "face_size_small": {
+      "0.5": {
+        "ci95": [
+          null,
+          null
+        ],
+        "exposed": 0,
+        "r_exposed": null,
+        "visible_face_frames": 0
+      },
+      "0.9": {
+        "ci95": [
+          null,
+          null
+        ],
+        "exposed": 0,
+        "r_exposed": null,
+        "visible_face_frames": 0
+      },
+      "1.0": {
+        "ci95": [
+          null,
+          null
+        ],
+        "exposed": 0,
+        "r_exposed": null,
+        "visible_face_frames": 0
+      }
+    },
+    "low_light": {
+      "0.5": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 18
+      },
+      "0.9": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 18
+      },
+      "1.0": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 18
+      }
+    },
+    "motion_blur": {
+      "0.5": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 48
+      },
+      "0.9": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 48
+      },
+      "1.0": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 48
+      }
+    },
+    "occlusion": {
+      "0.5": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 48
+      },
+      "0.9": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 48
+      },
+      "1.0": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 48
+      }
+    },
+    "overall": {
+      "0.5": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 72
+      },
+      "0.9": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 72
+      },
+      "1.0": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 72
+      }
+    },
+    "pose_profile": {
+      "0.5": {
+        "ci95": [
+          null,
+          null
+        ],
+        "exposed": 0,
+        "r_exposed": null,
+        "visible_face_frames": 0
+      },
+      "0.9": {
+        "ci95": [
+          null,
+          null
+        ],
+        "exposed": 0,
+        "r_exposed": null,
+        "visible_face_frames": 0
+      },
+      "1.0": {
+        "ci95": [
+          null,
+          null
+        ],
+        "exposed": 0,
+        "r_exposed": null,
+        "visible_face_frames": 0
+      }
+    },
+    "scene_transition": {
+      "0.5": {
+        "ci95": [
+          null,
+          null
+        ],
+        "exposed": 0,
+        "r_exposed": null,
+        "visible_face_frames": 0
+      },
+      "0.9": {
+        "ci95": [
+          null,
+          null
+        ],
+        "exposed": 0,
+        "r_exposed": null,
+        "visible_face_frames": 0
+      },
+      "1.0": {
+        "ci95": [
+          null,
+          null
+        ],
+        "exposed": 0,
+        "r_exposed": null,
+        "visible_face_frames": 0
+      }
+    }
+  },
+  "ms_per_frame": 332.14309456229785,
+  "over_masking_area_fraction": 0.48003327252815475,
+  "proxy_data": true,
+  "schema_version": 1,
+  "seed": 20261025,
+  "split": "heldout",
+  "step": "conservative",
+  "weights": {
+    "path_name": "det_500m.onnx",
+    "sha256": "5e4447f50245bbd7966bd6c0fa52938c61474a04ec7def48753668a9d8b4ea3a",
+    "source": "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_sc.zip (det_500m.onnx)"
+  }
+}

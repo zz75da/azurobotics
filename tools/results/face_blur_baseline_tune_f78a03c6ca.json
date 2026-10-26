@@ -1,0 +1,949 @@
+{
+  "clip_builder_version": "2.0",
+  "config": {
+    "detector": "yunet",
+    "fps": 12,
+    "hold_frames": 3,
+    "hold_seconds": 0.25,
+    "inflation_per_miss": 0.0,
+    "margins": {
+      "bottom": 0.25,
+      "top": 0.25,
+      "x": 0.2
+    },
+    "nms": 0.35,
+    "threshold": 0.35,
+    "tile_grid": 2,
+    "tile_overlap": 0.33333333333333326,
+    "tile_scale": 0.6,
+    "tracker": "current"
+  },
+  "dataset": {
+    "annotation_revision": "db171f1b7fedf4d3453e81297ff02f9915356d19",
+    "annotation_sha256": "753a8c0591cc570a793bb7fd2de4db6e5357bb1abbe863d8739d586369e32d9d",
+    "clips": 28,
+    "dataset_version": "WIDER FACE train bounding-box/attribute annotations; public HF mirror",
+    "frames": 64,
+    "image_revision": "04cab2dc3e18be03e2935b731c1dfa9eb29a31b5",
+    "source": "WIDER FACE train annotations and public still-image mirror; synthetic clips (proxy)",
+    "source_images": 8,
+    "source_manifest_sha256": "72bc9d35782529b85435ae70b1235c72912e85c567653bf6cd343c9a388a85c7"
+  },
+  "empty_frames": 16,
+  "failure_count_r90": 64,
+  "failure_frames_saved": 0,
+  "failures": [
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "88a2da126490",
+      "coverage": 0.2922077922077922,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "88a2da126490",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "88a2da126490",
+      "coverage": 0.6666666666666666,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "88a2da126490",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "88a2da126490",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "88a2da126490",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "88a2da126490",
+      "coverage": 0.8571428571428571,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "88a2da126490",
+      "coverage": 0.7777777777777778,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "88a2da126490",
+      "coverage": 0.0,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "88a2da126490",
+      "coverage": 0.0,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "88a2da126490",
+      "coverage": 0.0,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "low_light",
+        "motion_blur"
+      ],
+      "clip_id_hash": "b1b4209733b0",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "low_light",
+        "motion_blur"
+      ],
+      "clip_id_hash": "b1b4209733b0",
+      "coverage": 0.8571428571428571,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "low_light",
+        "motion_blur"
+      ],
+      "clip_id_hash": "b1b4209733b0",
+      "coverage": 0.125,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "low_light",
+        "motion_blur"
+      ],
+      "clip_id_hash": "b1b4209733b0",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "low_light",
+        "motion_blur"
+      ],
+      "clip_id_hash": "b1b4209733b0",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "low_light",
+        "motion_blur"
+      ],
+      "clip_id_hash": "b1b4209733b0",
+      "coverage": 0.7012987012987013,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "low_light",
+        "motion_blur"
+      ],
+      "clip_id_hash": "b1b4209733b0",
+      "coverage": 0.0,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "low_light",
+        "motion_blur"
+      ],
+      "clip_id_hash": "b1b4209733b0",
+      "coverage": 0.125,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "low_light",
+        "motion_blur"
+      ],
+      "clip_id_hash": "b1b4209733b0",
+      "coverage": 0.875,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "low_light",
+        "motion_blur"
+      ],
+      "clip_id_hash": "b1b4209733b0",
+      "coverage": 0.0,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "low_light",
+        "motion_blur"
+      ],
+      "clip_id_hash": "b1b4209733b0",
+      "coverage": 0.0,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "low_light",
+        "motion_blur"
+      ],
+      "clip_id_hash": "b1b4209733b0",
+      "coverage": 0.0,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "low_light",
+        "motion_blur"
+      ],
+      "clip_id_hash": "b1b4209733b0",
+      "coverage": 0.0,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "31bfe2eb51f3",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "31bfe2eb51f3",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "31bfe2eb51f3",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "31bfe2eb51f3",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "31bfe2eb51f3",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "31bfe2eb51f3",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "31bfe2eb51f3",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_medium",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "31bfe2eb51f3",
+      "coverage": 0.8791208791208791,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "31bfe2eb51f3",
+      "coverage": 0.0,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "31bfe2eb51f3",
+      "coverage": 0.0,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "31bfe2eb51f3",
+      "coverage": 0.0,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "31bfe2eb51f3",
+      "coverage": 0.0,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "31bfe2eb51f3",
+      "coverage": 0.0,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "31bfe2eb51f3",
+      "coverage": 0.0,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "31bfe2eb51f3",
+      "coverage": 0.0,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "18eb407fe02d",
+      "coverage": 0.8888888888888888,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "18eb407fe02d",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_large",
+        "pose_profile"
+      ],
+      "clip_id_hash": "18eb407fe02d",
+      "coverage": 0.8433734939759037,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_medium",
+        "low_light"
+      ],
+      "clip_id_hash": "37e62af29a1d",
+      "coverage": 0.8333333333333334,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "low_light",
+        "motion_blur"
+      ],
+      "clip_id_hash": "37e62af29a1d",
+      "coverage": 0.7777777777777778,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "low_light",
+        "motion_blur"
+      ],
+      "clip_id_hash": "37e62af29a1d",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_large",
+        "pose_profile",
+        "low_light"
+      ],
+      "clip_id_hash": "37e62af29a1d",
+      "coverage": 0.8433734939759037,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "low_light",
+        "motion_blur"
+      ],
+      "clip_id_hash": "37e62af29a1d",
+      "coverage": 0.0,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "20fcafc3d062",
+      "coverage": 0.8888888888888888,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "20fcafc3d062",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "20fcafc3d062",
+      "coverage": 0.0,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "459a72b8ae62",
+      "coverage": 0.2922077922077922,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "459a72b8ae62",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "459a72b8ae62",
+      "coverage": 0.6666666666666666,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "459a72b8ae62",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "459a72b8ae62",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "459a72b8ae62",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "459a72b8ae62",
+      "coverage": 0.8571428571428571,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "459a72b8ae62",
+      "coverage": 0.7777777777777778,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "459a72b8ae62",
+      "coverage": 0.0,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "459a72b8ae62",
+      "coverage": 0.0,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "459a72b8ae62",
+      "coverage": 0.0,
+      "frame": 1
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "occlusion",
+        "motion_blur"
+      ],
+      "clip_id_hash": "56e8f6d764a9",
+      "coverage": 0.8888888888888888,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_small",
+        "motion_blur"
+      ],
+      "clip_id_hash": "56e8f6d764a9",
+      "coverage": 0.0,
+      "frame": 0
+    },
+    {
+      "categories": [
+        "face_size_large",
+        "pose_profile"
+      ],
+      "clip_id_hash": "56e8f6d764a9",
+      "coverage": 0.8433734939759037,
+      "frame": 1
+    }
+  ],
+  "false_mask_frames": 16,
+  "false_mask_rate": 1.0,
+  "frame_count": 64,
+  "git_commit": "14d7a9425699a55246bc3155c6bcee3f4901ee1a",
+  "masked_area_fraction": 0.180407111009996,
+  "metrics": {
+    "face_size_large": {
+      "0.5": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 120
+      },
+      "0.9": {
+        "ci95": [
+          0.0,
+          0.05770348837209301
+        ],
+        "exposed": 3,
+        "r_exposed": 0.025,
+        "visible_face_frames": 120
+      },
+      "1.0": {
+        "ci95": [
+          0.03389830508474576,
+          0.1702127659574468
+        ],
+        "exposed": 10,
+        "r_exposed": 0.08333333333333333,
+        "visible_face_frames": 120
+      }
+    },
+    "face_size_medium": {
+      "0.5": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 88
+      },
+      "0.9": {
+        "ci95": [
+          0.0,
+          0.05555555555555555
+        ],
+        "exposed": 2,
+        "r_exposed": 0.022727272727272728,
+        "visible_face_frames": 88
+      },
+      "1.0": {
+        "ci95": [
+          0.0,
+          0.08333333333333333
+        ],
+        "exposed": 3,
+        "r_exposed": 0.03409090909090909,
+        "visible_face_frames": 88
+      }
+    },
+    "face_size_small": {
+      "0.5": {
+        "ci95": [
+          0.2073170731707317,
+          0.39880952380952384
+        ],
+        "exposed": 46,
+        "r_exposed": 0.3194444444444444,
+        "visible_face_frames": 144
+      },
+      "0.9": {
+        "ci95": [
+          0.3,
+          0.4666666666666667
+        ],
+        "exposed": 59,
+        "r_exposed": 0.4097222222222222,
+        "visible_face_frames": 144
+      },
+      "1.0": {
+        "ci95": [
+          0.3204545454545455,
+          0.48947368421052634
+        ],
+        "exposed": 63,
+        "r_exposed": 0.4375,
+        "visible_face_frames": 144
+      }
+    },
+    "low_light": {
+      "0.5": {
+        "ci95": [
+          0.0,
+          0.23531064111037672
+        ],
+        "exposed": 12,
+        "r_exposed": 0.13636363636363635,
+        "visible_face_frames": 88
+      },
+      "0.9": {
+        "ci95": [
+          0.0,
+          0.309862676056338
+        ],
+        "exposed": 18,
+        "r_exposed": 0.20454545454545456,
+        "visible_face_frames": 88
+      },
+      "1.0": {
+        "ci95": [
+          0.0,
+          0.32
+        ],
+        "exposed": 19,
+        "r_exposed": 0.2159090909090909,
+        "visible_face_frames": 88
+      }
+    },
+    "motion_blur": {
+      "0.5": {
+        "ci95": [
+          0.07842012951969779,
+          0.24048823155216284
+        ],
+        "exposed": 46,
+        "r_exposed": 0.17164179104477612,
+        "visible_face_frames": 268
+      },
+      "0.9": {
+        "ci95": [
+          0.11661144578313254,
+          0.29947962313759857
+        ],
+        "exposed": 60,
+        "r_exposed": 0.22388059701492538,
+        "visible_face_frames": 268
+      },
+      "1.0": {
+        "ci95": [
+          0.15240711854792965,
+          0.32831710051886376
+        ],
+        "exposed": 69,
+        "r_exposed": 0.2574626865671642,
+        "visible_face_frames": 268
+      }
+    },
+    "occlusion": {
+      "0.5": {
+        "ci95": [
+          0.09615384615384616,
+          0.5
+        ],
+        "exposed": 27,
+        "r_exposed": 0.3375,
+        "visible_face_frames": 80
+      },
+      "0.9": {
+        "ci95": [
+          0.2391304347826087,
+          0.6271224961479198
+        ],
+        "exposed": 39,
+        "r_exposed": 0.4875,
+        "visible_face_frames": 80
+      },
+      "1.0": {
+        "ci95": [
+          0.2857142857142857,
+          0.680855649303008
+        ],
+        "exposed": 42,
+        "r_exposed": 0.525,
+        "visible_face_frames": 80
+      }
+    },
+    "overall": {
+      "0.5": {
+        "ci95": [
+          0.05796404682274248,
+          0.19824608262108262
+        ],
+        "exposed": 46,
+        "r_exposed": 0.13068181818181818,
+        "visible_face_frames": 352
+      },
+      "0.9": {
+        "ci95": [
+          0.08536133694670281,
+          0.25
+        ],
+        "exposed": 64,
+        "r_exposed": 0.18181818181818182,
+        "visible_face_frames": 352
+      },
+      "1.0": {
+        "ci95": [
+          0.11951232856726,
+          0.2894736842105263
+        ],
+        "exposed": 76,
+        "r_exposed": 0.2159090909090909,
+        "visible_face_frames": 352
+      }
+    },
+    "pose_profile": {
+      "0.5": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 56
+      },
+      "0.9": {
+        "ci95": [
+          0.017241379310344827,
+          0.1
+        ],
+        "exposed": 3,
+        "r_exposed": 0.05357142857142857,
+        "visible_face_frames": 56
+      },
+      "1.0": {
+        "ci95": [
+          0.04,
+          0.22580645161290322
+        ],
+        "exposed": 8,
+        "r_exposed": 0.14285714285714285,
+        "visible_face_frames": 56
+      }
+    },
+    "scene_transition": {
+      "0.5": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 14
+      },
+      "0.9": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "exposed": 0,
+        "r_exposed": 0.0,
+        "visible_face_frames": 14
+      },
+      "1.0": {
+        "ci95": [
+          0.0,
+          0.14285714285714285
+        ],
+        "exposed": 1,
+        "r_exposed": 0.07142857142857142,
+        "visible_face_frames": 14
+      }
+    }
+  },
+  "ms_per_frame": 1055.472617093983,
+  "over_masking_area_fraction": 0.13997235010778508,
+  "proxy_data": true,
+  "schema_version": 1,
+  "seed": 20261025,
+  "split": "tune",
+  "step": "baseline",
+  "weights": {
+    "path_name": "face_detection_yunet_2023mar.onnx",
+    "sha256": "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
+    "source": "https://media.githubusercontent.com/media/opencv/opencv_zoo/f12e12798e8314f7c074a6656816c048dcc95b7a/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
+  }
+}
