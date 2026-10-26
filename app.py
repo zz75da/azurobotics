@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 from observability import RequestMetrics, configure_logging, read_recent_logs
 from mlops import MLOpsService
 from operations import PipelineOrchestrator
+from pipelines import PipelineBusy, PipelineRunner, public_mlflow_url
 from robot_data import analyze_text, make_sample_bundle
 from video_privacy import anonymize_video_isolated
 
@@ -31,6 +32,9 @@ LOG = logging.getLogger("robotics-demo")
 METRICS = RequestMetrics()
 ORCHESTRATOR: PipelineOrchestrator | None = None
 MLOPS: MLOpsService | None = None
+PIPELINES: PipelineRunner | None = None
+POLLED_ROUTES = {"/api/operations", "/api/pipelines", "/api/pipelines/runs", "/api/pipelines/runs/id"}
+PIPELINE_RUN_PATH = re.compile(r"^/api/pipelines/([a-z_]{1,64})/run$")
 LOG_PATH = ROOT / "logs" / "app.jsonl"
 
 
@@ -74,8 +78,19 @@ class Handler(BaseHTTPRequestHandler):
                 if MLOPS is None:
                     raise RequestError(HTTPStatus.SERVICE_UNAVAILABLE, "Service MLOps non démarré.")
                 self._send_json(MLOPS.status())
+            elif path == "/api/pipelines":
+                self._send_json(self._pipelines().definitions(public_mlflow_url()))
+            elif path == "/api/pipelines/runs":
+                self._send_json({"runs": self._pipelines().list_runs()})
+            elif path.startswith("/api/pipelines/runs/"):
+                run = self._pipelines().get_run(path[len("/api/pipelines/runs/"):])
+                if run is None:
+                    raise RequestError(HTTPStatus.NOT_FOUND, "Exécution introuvable.")
+                self._send_json(run)
             elif path == "/metrics":
                 body = METRICS.prometheus_metrics()
+                if PIPELINES is not None:
+                    body += PIPELINES.prometheus_metrics()
                 if ORCHESTRATOR is not None:
                     body += ORCHESTRATOR.prometheus_metrics()
                 if MLOPS is not None:
@@ -103,8 +118,9 @@ class Handler(BaseHTTPRequestHandler):
             ):
                 body = b""
             else:
-                limit = MAX_ANALYSIS_REQUEST_BYTES if path in (
-                    "/api/analyze", "/api/jobs/schedule", "/api/ml/predict"
+                limit = MAX_ANALYSIS_REQUEST_BYTES if (
+                    path in ("/api/analyze", "/api/jobs/schedule", "/api/ml/predict")
+                    or PIPELINE_RUN_PATH.match(path)
                 ) else MAX_REQUEST_BYTES
                 body = self._read_body(limit)
             if path == "/api/sample":
@@ -123,6 +139,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._train_model(body)
             elif path == "/api/ml/predict":
                 self._predict(body)
+            elif PIPELINE_RUN_PATH.match(path):
+                self._run_pipeline(PIPELINE_RUN_PATH.match(path).group(1), body)
             else:
                 self._send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
         except RequestError as error:
@@ -148,7 +166,7 @@ class Handler(BaseHTTPRequestHandler):
         route = _route_label(path)
         status = self._response_status
         METRICS.observe(self.command, route, status, duration)
-        if self.command == "GET" and route == "/api/operations":
+        if self.command == "GET" and route in POLLED_ROUTES:
             return
         LOG.info(
             "http_request",
@@ -275,6 +293,26 @@ class Handler(BaseHTTPRequestHandler):
                 )
         self._send_json(MLOPS.train(content, **options))
 
+    @staticmethod
+    def _pipelines() -> PipelineRunner:
+        if PIPELINES is None:
+            raise RequestError(HTTPStatus.SERVICE_UNAVAILABLE, "Service de pipelines non démarré.")
+        return PIPELINES
+
+    def _run_pipeline(self, name: str, body: bytes) -> None:
+        runner = self._pipelines()
+        try:
+            request = json.loads(body.decode("utf-8")) if body else {}
+        except json.JSONDecodeError as error:
+            raise ValueError("Corps JSON invalide.") from error
+        try:
+            run = runner.start(name, request)
+        except KeyError as error:
+            raise RequestError(HTTPStatus.NOT_FOUND, "Pipeline inconnu.") from error
+        except PipelineBusy as error:
+            raise RequestError(HTTPStatus.CONFLICT, str(error)) from error
+        self._send_json(run, HTTPStatus.ACCEPTED)
+
     def _predict(self, body: bytes) -> None:
         if MLOPS is None:
             raise RequestError(HTTPStatus.SERVICE_UNAVAILABLE, "Service MLOps non démarré.")
@@ -375,13 +413,14 @@ def _validate_tuning_results(value: Any) -> list | None:
 
 
 def main() -> None:
-    global MLOPS, ORCHESTRATOR, LOG_PATH
+    global MLOPS, ORCHESTRATOR, PIPELINES, LOG_PATH
     LOG_PATH = configure_logging(ROOT / "logs")
     MLOPS = MLOpsService(
         ROOT / "data" / "mlops.sqlite3",
         ROOT / "data" / "models",
         ROOT / "data" / "evidently",
     )
+    PIPELINES = PipelineRunner(MLOPS.database_path, MLOPS)
     ORCHESTRATOR = PipelineOrchestrator(
         ROOT / "data" / "operations.sqlite3",
         model_trainer=MLOPS.train,
@@ -443,7 +482,12 @@ def _get_video_job(job_id: str) -> dict:
 def _route_label(path: str) -> str:
     if path.startswith("/api/anonymize/"):
         return "/api/anonymize/job"
+    if path.startswith("/api/pipelines/runs/"):
+        return "/api/pipelines/runs/id"
+    if PIPELINE_RUN_PATH.match(path):
+        return "/api/pipelines/run"
     known_routes = {
+        "/api/pipelines", "/api/pipelines/runs",
         "/", "/api/health", "/api/operations", "/api/analyze", "/api/sample",
         "/api/anonymize", "/api/jobs/schedule", "/api/jobs/run", "/api/jobs/stop", "/metrics",
         "/api/ml/status", "/api/ml/train", "/api/ml/predict",
