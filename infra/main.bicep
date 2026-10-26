@@ -61,11 +61,6 @@ module logAnalytics './modules/log-analytics.bicep' = {
   }
 }
 
-resource logWorkspace 'Microsoft.OperationalInsights/workspaces@2026-03-01' existing = {
-  name: logAnalyticsName
-  scope: resourceGroup(subscription().subscriptionId, resourceGroupName)
-}
-
 module keyVault './modules/key-vault.bicep' = {
   name: 'keyVault'
   scope: rg
@@ -84,8 +79,7 @@ module containerAppsEnvironment './modules/container-app-environment.bicep' = {
     location: location
     name: containerAppsEnvironmentName
     tags: tags
-    workspaceCustomerId: logAnalytics.outputs.customerId
-    workspaceSharedKey: logWorkspace.listKeys().primarySharedKey
+    workspaceResourceId: logAnalytics.outputs.resourceId
   }
 }
 

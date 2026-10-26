@@ -60,7 +60,7 @@
         "refId": "A", "queryType": "Azure Log Analytics",
         "azureLogAnalytics": {
           "resources": ["/subscriptions/__SUBSCRIPTION_ID__/resourceGroups/rg-marso-dev-99ff/providers/Microsoft.OperationalInsights/workspaces/log-marso-dev-99ff"],
-          "query": "ContainerAppConsoleLogs_CL | where ContainerAppName_s startswith 'ca-robotics' and Log_s !has 'api/health' | project TimeGenerated, Log_s | order by TimeGenerated desc | take 100",
+          "query": "ContainerAppConsoleLogs | where ContainerAppName startswith 'ca-robotics' and Log !has 'api/health' | project TimeGenerated, Log | order by TimeGenerated desc | take 100",
           "resultFormat": "table"
         }
       }]

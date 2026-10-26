@@ -216,17 +216,36 @@
       setBusy(button, true, "Traitement local…");
       try {
         const form = new FormData(); form.append("video", file);
-        const readJson = async r => { try { return await r.json(); } catch { return {error: `Erreur serveur (${r.status}).`}; } };
-        const start = await fetch("/api/anonymize", {method:"POST",body:form});
+        // A non-JSON reply comes from the platform in front of the app (restart, cold start), not from the app itself.
+        const readJson = async r => {
+          try { return await r.json(); }
+          catch {
+            if (r.status === 401) return {error: "Session expirée : rechargez la page pour vous reconnecter, puis renvoyez la vidéo."};
+            return {error: `Le serveur a redémarré ou est momentanément indisponible (code ${r.status}). Réessayez dans une minute.`};
+          }
+        };
+        const start = await fetch("/api/anonymize", {method:"POST",body:form}).catch(() => null);
+        if (!start) throw new Error("Envoi interrompu : vérifiez la connexion puis réessayez.");
         const started = await readJson(start);
         if (!start.ok) throw new Error(started.error || "Traitement échoué.");
+        const begun = Date.now();
+        let failures = 0;
         for (;;) {
           await new Promise(resolve => setTimeout(resolve, 3000));
-          const poll = await fetch("/api/anonymize/" + started.job_id), state = await readJson(poll);
-          if (!poll.ok) throw new Error(state.error || "Suivi du traitement impossible.");
+          const poll = await fetch("/api/anonymize/" + started.job_id).catch(() => null);
+          if (poll && poll.status === 404) throw new Error("Le serveur a redémarré pendant le traitement et la tâche a été perdue : renvoyez la vidéo.");
+          const state = poll ? await readJson(poll) : {};
+          if (!poll || !poll.ok) {
+            // Ride out a short restart or network blip before giving up.
+            if (++failures >= 10) throw new Error(state.error || "Suivi du traitement impossible : réessayez dans une minute.");
+            status.textContent = "Connexion au serveur perdue, nouvelle tentative…";
+            continue;
+          }
+          failures = 0;
           if (state.status === "error") throw new Error(state.error || "Traitement échoué.");
           if (state.status === "done") break;
-          status.textContent = "Traitement en cours… (peut durer plusieurs minutes)";
+          const minutes = Math.floor((Date.now() - begun) / 60000);
+          status.textContent = `Traitement en cours… ${minutes} min écoulée${minutes > 1 ? "s" : ""} (environ 3 min par minute de vidéo sur Azure).`;
         }
         const response = await fetch(`/api/anonymize/${started.job_id}/result`);
         if (!response.ok) throw new Error((await readJson(response)).error || "Téléchargement échoué.");
