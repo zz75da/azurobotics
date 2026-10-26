@@ -188,6 +188,8 @@ def log_training_run(
                 name="model",
                 signature=signature,
                 input_example=input_example,
+                # MLflow 3.17 defaults to skops, which needs an extra dependency and a trusted-type list.
+                serialization_format="cloudpickle",
                 registered_model_name=model_name if promoted else None,
             )
         if promoted:
