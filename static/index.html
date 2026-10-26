@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>Marso Robotics · Data Lab local</title>
+  <title>Robotics · Data Lab local</title>
   <style>
     :root { color-scheme: dark; --bg:#10151c; --panel:#19222d; --line:#2b3948; --muted:#9aabba; --text:#edf3f8; --accent:#68d5b1; --warn:#ffcf70; }
     * { box-sizing:border-box }
@@ -61,7 +61,7 @@
   </style>
 </head>
 <body>
-  <header><div class="brand">Marso Robotics · laboratoire local</div><h1>Exploration des données de flotte</h1><span class="badge">Traitement local · aucun envoi réseau</span></header>
+  <header><div class="brand">Robotics · laboratoire local</div><h1>Exploration des données de flotte</h1><span class="badge">Traitement local · aucun envoi réseau</span></header>
   <main>
     <p class="intro">Prototype hors ligne pour tester l’analyse de télémétrie et le floutage vidéo. Générez un jeu synthétique ou importez des CSV/JSONL et des vidéos stockés sur votre PC.</p>
     <div class="grid">
@@ -112,12 +112,12 @@
           <button id="refreshMl">Actualiser l’état MLOps</button>
           <a id="grafanaLink" class="button" href="http://127.0.0.1:3000" target="_blank" rel="noreferrer">Grafana</a>
           <a id="mlflowLink" class="button" href="http://127.0.0.1:5000" target="_blank" rel="noreferrer" hidden>MLflow</a>
-          <a class="button local-only" href="http://127.0.0.1:8000" target="_blank" rel="noreferrer">Evidently</a>
+          <a id="evidentlyLink" class="button" href="http://127.0.0.1:8000" target="_blank" rel="noreferrer">Evidently</a>
         </div>
         <div id="mlStatus" class="status" aria-live="polite"></div>
         <div id="mlSummary" class="metrics"></div>
         <div id="mlResult" class="logs" aria-live="polite">Aucun modèle ni lot de prédiction.</div>
-        <p class="small">Chaque prédiction crée un rapport de dérive Evidently ; seuls les résultats sont enregistrés, pas les lignes brutes. <span class="local-only">Les liens Grafana et Evidently nécessitent la stack Docker Compose.</span><span id="cloudNote" hidden>Grafana et Evidently nécessitent la stack Docker Compose en local ; sur Azure, Grafana affiche les métriques Azure Monitor (premier chargement : environ 30 s) et Evidently n’est pas déployé.</span></p>
+        <p class="small">Chaque prédiction crée un rapport de dérive Evidently ; seuls les résultats sont enregistrés, pas les lignes brutes. <span class="local-only">Les liens Grafana et Evidently nécessitent la stack Docker Compose.</span><span id="cloudNote" hidden>Grafana et Evidently nécessitent la stack Docker Compose en local ; sur Azure, Grafana affiche les métriques Azure Monitor (premier chargement : environ 30 s) et Evidently affiche les rapports de dérive enregistrés sur le stockage partagé.</span></p>
       </section>
       <section class="wide" id="pipelinesSection" aria-labelledby="pipelinesTitle">
         <h2 id="pipelinesTitle">6 · Pipelines</h2>
@@ -140,6 +140,7 @@
                     const mlflow = document.getElementById("mlflowLink");
                     mlflow.href = "https://" + location.hostname.replace(/^ca-robotics-/, "ca-mlflow-");
                     mlflow.hidden = false;
+                    document.getElementById("evidentlyLink").href = "https://" + location.hostname.replace(/^ca-robotics-/, "ca-evidently-");
                   }
       </script>
     </div>

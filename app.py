@@ -418,7 +418,7 @@ def main() -> None:
     MLOPS = MLOpsService(
         ROOT / "data" / "mlops.sqlite3",
         ROOT / "data" / "models",
-        ROOT / "data" / "evidently",
+        Path(os.environ.get("EVIDENTLY_WORKSPACE") or ROOT / "data" / "evidently"),
     )
     PIPELINES = PipelineRunner(MLOPS.database_path, MLOPS)
     ORCHESTRATOR = PipelineOrchestrator(

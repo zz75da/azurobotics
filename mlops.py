@@ -27,7 +27,8 @@ from experiment_tracking import digest_text, log_training_run
 
 FEATURES = ("duration_ms", "battery_pct", "x_m", "y_m")
 MODEL_NAME = "robot-telemetry-isolation-forest"
-EVIDENTLY_PROJECT_NAME = "Marso Robotics - Telemetry Drift"
+EVIDENTLY_PROJECT_NAME = "Robotics - Telemetry Drift"
+LEGACY_EVIDENTLY_PROJECT_NAME = "Marso Robotics - Telemetry Drift"
 MIN_TRAINING_ROWS = 40
 MAX_PREDICTION_ROWS = 200_000
 PREDICTION_CHUNK_ROWS = 10_000
@@ -177,8 +178,14 @@ class MLOpsService:
         self._initialize()
         self._workspace = Workspace.create(str(self.evidently_path))
         projects = self._workspace.search_project(EVIDENTLY_PROJECT_NAME)
+        legacy = [] if projects else self._workspace.search_project(LEGACY_EVIDENTLY_PROJECT_NAME)
         if projects:
             self._evidently_project = projects[0]
+        elif legacy:
+            # Rename in place so existing drift snapshots stay in the same project.
+            self._evidently_project = legacy[0]
+            self._evidently_project.name = EVIDENTLY_PROJECT_NAME
+            self._evidently_project.save()
         else:
             self._evidently_project = self._workspace.create_project(EVIDENTLY_PROJECT_NAME)
             self._evidently_project.description = (

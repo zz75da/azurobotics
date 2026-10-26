@@ -74,7 +74,7 @@ La section « Orchestration et supervision » permet de lancer le pipeline synth
 - `GET /api/ml/status` : modèle actif, dernières versions et lots prédits.
 - `POST /api/ml/train` : entraîne/évalue l'Isolation Forest sur le CSV synthétique ; seuils de promotion AUC ≥ 0,75 et F1 ≥ 0,5.
 - `POST /api/ml/predict` : prédit sur un CSV avec `duration_ms`, `battery_pct`, `x_m`, `y_m` et crée un rapport Evidently de dérive.
-- Interface Evidently : snapshots de dérive stockés dans `data/evidently/`, avec `include_data=False` pour ne pas archiver les lignes importées.
+- Interface Evidently : snapshots de dérive stockés dans `data/evidently/`, avec `include_data=False` pour ne pas archiver les lignes importées. Sur Azure, `EVIDENTLY_WORKSPACE` place ces snapshots sur le partage Azure Files de MLflow (`/mnt/mlflow/evidently`) et l'application `infra/evidently.bicep` les affiche derrière la connexion Entra (mise à l'échelle à zéro).
 - `logs/app.jsonl` : événements JSON horodatés incluant ID de requête, durée, statut HTTP ou ID/durée d'exécution. Aucun contenu des fichiers importés ni données de télémétrie n'est inscrit dans les logs.
 - `data/operations.sqlite3` : configuration et historique synthétique des runs.
 - `data/mlops.sqlite3` et `data/models/` : registre local, métriques d'évaluation et 3 artefacts de modèles promus maximum.
@@ -133,7 +133,7 @@ python -m pytest -q
 - `ci.yml` (PR et branches hors `main`) : tests, compilation Bicep, build Docker.
 - `deploy.yml` (push sur `main`) : tests → build ACR → déploiement (environnement `production`) → vérification de santé et redirection Entra ; réentraînement optionnel (`workflow_dispatch`).
 - `retrain.yml` (lundi 03:00 UTC ou manuel) : entraîne dans le conteneur et journalise dans MLflow (hyperparamètres, description).
-- Connexion Azure par OIDC, sans secret : variables du dépôt `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, `AZURE_REGISTRY_NAME`, `AZURE_APP_NAME`, `AZURE_GRAFANA_APP_NAME`. L'application Entra a le rôle Contributeur sur le groupe de ressources uniquement.
+- Connexion Azure par OIDC, sans secret : variables du dépôt `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, `AZURE_REGISTRY_NAME`, `AZURE_APP_NAME`, `AZURE_GRAFANA_APP_NAME`, `AZURE_EVIDENTLY_APP_NAME` (facultatif). L'application Entra a le rôle Contributeur sur le groupe de ressources uniquement.
 
 ## Proposition d'architecture cible pour plusieurs To/jour
 
