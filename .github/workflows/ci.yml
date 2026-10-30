@@ -61,5 +61,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: docker build -t robotics-demo:ci .
+      - run: docker run --rm robotics-demo:ci python -c "import app"
       - run: docker build -t mlflow-server:ci mlflow-server
       - run: docker build -t grafana-robotics:ci --build-arg SUBSCRIPTION_ID=00000000-0000-0000-0000-000000000000 grafana
