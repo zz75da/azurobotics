@@ -35,6 +35,19 @@ def test_training_prediction_and_evidently_report_are_persisted(tmp_path):
     assert prediction["evidently_snapshot_id"] in run_ids
 
 
+def test_evidently_dashboard_is_created_once_and_keeps_manual_panels(tmp_path):
+    def open_service():
+        return MLOpsService(tmp_path / "m.sqlite3", tmp_path / "models", tmp_path / "ev")
+
+    service = open_service()
+    dashboard = service._evidently_project.dashboard
+    assert len(dashboard.model().panels) == 4
+
+    dashboard.delete_panel(dashboard.model().panels[0].title, dashboard.model().tabs[0].title)
+    remaining = len(dashboard.model().panels)
+    assert len(open_service()._evidently_project.dashboard.model().panels) == remaining
+
+
 def test_training_rejects_csv_without_binary_labels(tmp_path):
     service = MLOpsService(
         tmp_path / "mlops.sqlite3",
