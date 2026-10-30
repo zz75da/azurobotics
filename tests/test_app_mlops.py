@@ -4,8 +4,9 @@ from email.message import Message
 from http.server import ThreadingHTTPServer
 from urllib.request import Request, urlopen
 
-import app
 import pytest
+
+import app
 from mlops import MLOpsService
 from robot_data import make_sample_telemetry_csv
 

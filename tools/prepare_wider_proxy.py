@@ -6,12 +6,12 @@ import hashlib
 import json
 import random
 import tempfile
+from io import BytesIO
 from pathlib import Path
 from urllib.error import URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 from zipfile import ZipFile
-from io import BytesIO
 
 ANNOTATION_REVISION = "db171f1b7fedf4d3453e81297ff02f9915356d19"
 IMAGE_REVISION = "04cab2dc3e18be03e2935b731c1dfa9eb29a31b5"

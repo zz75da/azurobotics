@@ -7,7 +7,7 @@ import os
 import random
 import subprocess
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -15,6 +15,7 @@ import cv2
 import numpy as np
 
 import video_privacy
+
 try:
     from .replay_to_mlflow import log_result
 except ImportError:
@@ -318,8 +319,9 @@ class BoxTracker:
                 track["predicted"] = track["filter"].predict()[:4, 0]
         for detection in detections:
             box = detection[:4]
-            predicted = lambda track: track.get("predicted", track["box"] +
-                                               (track["velocity"] if self.mode == "velocity" else 0))
+            def predicted(track):
+                return track.get("predicted", track["box"] + (track["velocity"] if self.mode == "velocity" else 0))
+
             best = max(unmatched, key=lambda i: video_privacy._box_iou(predicted(self.tracks[i]), box), default=None)
             if best is not None and video_privacy._box_iou(predicted(self.tracks[best]), box) >= 0.2:
                 track = self.tracks[best]
@@ -442,7 +444,7 @@ def evaluate(detector_kind: str, config: dict[str, Any], clips: list[Clip], weig
                 empty_frames += 1; false_frames += int(mask.sum() > 0)
     if failure_dir is not None:
         failure_dir.mkdir(parents=True, exist_ok=True)
-        for saved, (coverage, clip_id, frame_index, visual) in enumerate(sorted(failure_images, key=lambda row: row[0])[:100]):
+        for saved, (_coverage, clip_id, frame_index, visual) in enumerate(sorted(failure_images, key=lambda row: row[0])[:100]):
             safe_clip_id = clip_id.replace(":", "_").replace("/", "_")
             cv2.imwrite(str(failure_dir / f"failure_{saved:03d}_{safe_clip_id}_{frame_index}.jpg"), visual)
     saved = min(100, len(failure_images))

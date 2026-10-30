@@ -13,6 +13,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install ruff==0.17.3
+      - run: ruff check .
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -44,6 +54,7 @@ jobs:
           az bicep build --file infra/mlflow.bicep --stdout > /dev/null
           az bicep build --file infra/grafana.bicep --stdout > /dev/null
           az bicep build --file infra/evidently.bicep --stdout > /dev/null
+          az bicep build --file infra/alerts.bicep --stdout > /dev/null
 
   docker:
     runs-on: ubuntu-latest

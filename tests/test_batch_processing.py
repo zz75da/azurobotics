@@ -1,4 +1,3 @@
-import cv2
 
 import mlops
 import video_privacy
