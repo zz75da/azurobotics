@@ -16,6 +16,8 @@ import numpy as np
 import pandas as pd
 from evidently import DataDefinition, Dataset, Report
 from evidently.presets import DataDriftPreset
+from evidently.sdk.models import PanelMetric
+from evidently.sdk.panels import counter_panel, line_plot_panel
 from evidently.ui.workspace import Workspace
 from sklearn.ensemble import IsolationForest, RandomForestClassifier
 from sklearn.metrics import f1_score, precision_recall_curve, precision_score, recall_score, roc_auc_score
@@ -31,6 +33,8 @@ OPTIONAL_FEATURES = ("air_temp_k", "temp_delta_k", "power_w", "wear_torque", "ty
 MODEL_NAME = "robot-telemetry-isolation-forest"
 EVIDENTLY_PROJECT_NAME = "Robotics - Telemetry Drift"
 LEGACY_EVIDENTLY_PROJECT_NAME = "Marso Robotics - Telemetry Drift"
+DRIFTED_COLUMNS_METRIC = "evidently:metric_v2:DriftedColumnsCount"
+VALUE_DRIFT_METRIC = "evidently:metric_v2:ValueDrift"
 MIN_TRAINING_ROWS = 40
 MAX_PREDICTION_ROWS = 200_000
 PREDICTION_CHUNK_ROWS = 10_000
@@ -200,6 +204,27 @@ class MLOpsService:
                 "Les données brutes ne sont pas conservées dans les snapshots."
             )
             self._evidently_project.save()
+        self._ensure_evidently_dashboard()
+
+    def _ensure_evidently_dashboard(self) -> None:
+        # Only an empty dashboard is filled, so panels added by hand in the UI survive restarts.
+        dashboard = self._evidently_project.dashboard
+        if dashboard.model().panels:
+            return
+        share = PanelMetric(legend="part dérivée", metric=DRIFTED_COLUMNS_METRIC, metric_labels={"value_type": "share"})
+        count = PanelMetric(legend="colonnes", metric=DRIFTED_COLUMNS_METRIC, metric_labels={"value_type": "count"})
+        for panel in (
+            counter_panel("Part de colonnes en dérive (dernier lot)", [share], size="half"),
+            counter_panel("Colonnes en dérive (dernier lot)", [count], size="half"),
+            line_plot_panel("Part de colonnes en dérive", [share], "Un réentraînement est demandé à partir de 0,5."),
+            line_plot_panel(
+                "p-value de dérive par colonne",
+                [PanelMetric(legend=column, metric=VALUE_DRIFT_METRIC, metric_labels={"column": column})
+                 for column in FEATURES + OPTIONAL_FEATURES],
+                "Test K-S : une colonne dérive sous 0,05.",
+            ),
+        ):
+            dashboard.add_panel(panel)
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(str(self.database_path), timeout=10)
