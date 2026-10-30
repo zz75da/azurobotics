@@ -5,8 +5,9 @@ targetScope = 'resourceGroup'
 
 param location string = 'global'
 param containerAppName string
-param alertEmail string
 param tags object = {}
+
+var ownerRoleId = '8e3af657-a8ff-443c-a75c-2fe8c4bcb635'
 
 resource app 'Microsoft.App/containerApps@2026-01-01' existing = {
   name: containerAppName
@@ -19,10 +20,11 @@ resource actionGroup 'Microsoft.Insights/actionGroups@2023-01-01' = {
   properties: {
     enabled: true
     groupShortName: 'robotics'
-    emailReceivers: [
+    // Mails the subscription owners, so no personal address lives in the template.
+    armRoleReceivers: [
       {
         name: 'owner'
-        emailAddress: alertEmail
+        roleId: ownerRoleId
         useCommonAlertSchema: true
       }
     ]
