@@ -1,30 +1,262 @@
-# Robotics — Data Lab local
+# Azurobotics — Data Lab robotique MLOps sur Microsoft Azure
 
-Prototype Windows, local et open source pour explorer des journaux/télémétries de robots, tester un traitement vidéo et exercer un cycle MLOps. Il ne requiert ni compte cloud, ni serveur de base de données externe, ni poids de modèle pré-entraîné ; SQLite, les artefacts du modèle et les rapports Evidently restent locaux. L'interface est publiée exclusivement sur `127.0.0.1`.
+[![CI](https://github.com/zz75da/azurobotics/actions/workflows/ci.yml/badge.svg)](https://github.com/zz75da/azurobotics/actions/workflows/ci.yml)
+[![Deploy](https://github.com/zz75da/azurobotics/actions/workflows/deploy.yml/badge.svg)](https://github.com/zz75da/azurobotics/actions/workflows/deploy.yml)
 
-## Architecture du prototype
+Plateforme d'exploration de télémétrie robot, de détection d'anomalies et d'anonymisation vidéo, **déployée sur Azure Container Apps** et décrite entièrement en **Bicep** (Infrastructure as Code). Le dépôt couvre le cycle MLOps de bout en bout : entraînement et promotion de modèles, suivi des expériences dans **MLflow**, détection de dérive avec **Evidently**, supervision **Azure Monitor / Log Analytics** dans **Grafana**, et livraison continue par **GitHub Actions** avec une connexion **OIDC sans secret**.
+
+Toutes les applications Azure sont protégées par **Microsoft Entra ID** (Easy Auth), récupèrent leurs secrets dans **Key Vault** par **identité managée** et descendent à **zéro réplica** quand elles ne servent pas. Le même code tourne aussi entièrement en local sur Windows (voir [Mode local](#mode-local-windows)).
+
+---
+
+## Sommaire
+
+1. [Architecture Azure](#architecture-azure)
+2. [Services Azure utilisés](#services-azure-utilisés)
+3. [Sécurité et identité](#sécurité-et-identité)
+4. [Déploiement de l'infrastructure (Bicep)](#déploiement-de-linfrastructure-bicep)
+5. [CI/CD avec GitHub Actions](#cicd-avec-github-actions)
+6. [MLOps sur Azure](#mlops-sur-azure)
+7. [Observabilité sur Azure](#observabilité-sur-azure)
+8. [Coûts et limites de l'environnement Azure](#coûts-et-limites-de-lenvironnement-azure)
+9. [Fonctionnalités de l'application](#fonctionnalités-de-lapplication)
+10. [Mode local (Windows)](#mode-local-windows)
+11. [Structure du dépôt](#structure-du-dépôt)
+12. [Tests](#tests)
+13. [Architecture cible pour plusieurs To/jour](#architecture-cible-pour-plusieurs-tojour)
+
+---
+
+## Architecture Azure
+
+```text
+                         GitHub Actions (OIDC → Entra ID, aucun secret stocké)
+                         │  tests → az acr build → az containerapp update → smoke test
+                         ▼
+┌──────────────────────── Groupe de ressources (francecentral) ───────────────────────┐
+│                                                                                      │
+│  Azure Container Registry ──(AcrPull, identité managée)──┐                           │
+│                                                          ▼                           │
+│  ┌───────────────── Container Apps Environment ─────────────────────────────┐        │
+│  │                                                                          │        │
+│  │  ca-…  Application robotics (app.py)   ◄── Entra ID Easy Auth (HTTPS)    │        │
+│  │        1 vCPU / 2 Gio, 0→1 réplica, sonde /api/health                    │        │
+│  │            │ MLFLOW_TRACKING_URI / EVIDENTLY_WORKSPACE                   │        │
+│  │            ▼                                                             │        │
+│  │  ┌──── Azure Files (partage « mlflow », 5 Gio) ────┐                     │        │
+│  │  │  /mnt/mlflow/mlruns      /mnt/mlflow/evidently  │                     │        │
+│  │  └─────────▲───────────────────────▲───────────────┘                     │        │
+│  │            │                       │                                     │        │
+│  │  MLflow server (Entra ID)   Evidently UI (Entra ID)                      │        │
+│  │                                                                          │        │
+│  │  Grafana (Entra ID) ── identité managée ──► Azure Monitor + Log Analytics│        │
+│  └──────────────────────────────────────────────────────────────────────────┘        │
+│                                                                                      │
+│  Key Vault (RBAC) : entra-client-secret, mot de passe admin Grafana                  │
+│  Log Analytics : journaux console/système des Container Apps                         │
+└──────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+Quatre Container Apps partagent un même environnement :
+
+| Container App | Image | Rôle | Fichier Bicep |
+| --- | --- | --- | --- |
+| Application robotics | `robotics-demo:<sha>` | UI web, API, pipelines, entraînement et prédiction | `infra/main.bicep` + `infra/modules/container-app.bicep` |
+| MLflow | `mlflow-server:latest` | Suivi des expériences et des modèles (store fichier sur Azure Files) | `infra/mlflow.bicep` |
+| Evidently UI | `robotics-demo:<sha>` (commande `evidently ui`) | Consultation des rapports de dérive | `infra/evidently.bicep` |
+| Grafana | `grafana-robotics:latest` | Dashboard « Robotics on Azure (Container Apps) » sur Azure Monitor | `infra/grafana.bicep` |
+
+L'application et MLflow montent le **même partage Azure Files** au même chemin (`/mnt/mlflow`), ce qui permet aux URI d'artefacts MLflow de se résoudre dans les deux conteneurs. Evidently UI réutilise ce partage, l'identité et le stockage d'environnement de MLflow, sans nouveau compte de stockage ni nouvelle attribution de rôle.
+
+## Services Azure utilisés
+
+| Service | Usage dans le projet |
+| --- | --- |
+| **Azure Container Apps** | Hébergement serverless des 4 applications, révisions uniques, mise à l'échelle 0→1 |
+| **Azure Container Registry** | Build des images directement dans Azure (`az acr build`), tirées par identité managée |
+| **Azure Files** (Storage Account) | Volume persistant partagé MLflow + snapshots Evidently |
+| **Azure Key Vault** | Secret client Entra et mot de passe admin Grafana, autorisation RBAC, soft-delete 7 jours |
+| **Microsoft Entra ID** | Authentification intégrée (Easy Auth) devant chaque application ; fédération OIDC pour GitHub Actions |
+| **Identités managées** | Système pour l'application, utilisateur pour MLflow, Evidently et Grafana (aucune clé dans le code) |
+| **Log Analytics** | Collecte des journaux des Container Apps, requêtée depuis Grafana |
+| **Azure Monitor** | Métriques plateforme (requêtes, réplicas, CPU, mémoire) affichées dans Grafana |
+| **Azure Verified Modules** | Modules Bicep publics `br/public:avm/...` pour Container Apps, ACR et Log Analytics |
+
+## Sécurité et identité
+
+- **Aucun accès anonyme** : chaque Container App a une configuration `authConfigs` Entra ID avec `unauthenticatedClientAction: RedirectToLoginPage`, HTTPS obligatoire et audience limitée au client Entra. Le smoke test du déploiement vérifie que `/.auth/login/aad` répond bien `302`.
+- **Aucun secret dans le dépôt ni dans GitHub** : GitHub Actions s'authentifie auprès d'Azure par **fédération OIDC** (`azure/login@v3` avec `id-token: write`). L'application Entra n'a que le rôle **Contributeur sur le groupe de ressources**.
+- **Secrets dans Key Vault, lus par identité managée** : le secret `entra-client-secret` est référencé par URI Key Vault depuis les Container Apps (`identity: 'system'`), jamais copié en clair. Le mot de passe admin Grafana est généré (`newGuid()`) et stocké en secret.
+- **Moindre privilège par rôle** : `AcrPull` sur le registre, `Key Vault Secrets User` pour les applications, `Key Vault Secrets Officer` pour le déployeur uniquement, `Monitoring Reader` et `Log Analytics Reader` pour Grafana.
+- **Contrôle des hôtes** : `ROBOTICS_DEMO_ALLOWED_HOSTS` est fixé au FQDN exact de l'application ; les requêtes POST d'autres hôtes ou origines sont refusées (aucun joker).
+- **Données** : les fichiers et vidéos importés ne sont pas conservés après la requête, les logs n'en contiennent aucun contenu et les rapports Evidently sont écrits avec `include_data=False`.
+- **Dépendances** : Dependabot (`.github/dependabot.yml`) et `pip-audit` en CI (à titre indicatif).
+
+## Déploiement de l'infrastructure (Bicep)
+
+L'infrastructure est découpée en un déploiement **au niveau abonnement** (socle) et trois déploiements **au niveau groupe de ressources** (services MLOps).
+
+| Fichier | Portée | Crée |
+| --- | --- | --- |
+| `infra/main.bicep` | Abonnement | Groupe de ressources, ACR, Log Analytics, Key Vault, environnement Container Apps, application robotics, attributions de rôles |
+| `infra/mlflow.bicep` | Groupe de ressources | Compte de stockage + partage Azure Files, stockage d'environnement, identité, Container App MLflow + Easy Auth |
+| `infra/grafana.bicep` | Groupe de ressources | Identité, rôles de lecture Monitor/Log Analytics, Container App Grafana + Easy Auth |
+| `infra/evidently.bicep` | Groupe de ressources | Container App Evidently UI + Easy Auth (réutilise le partage et l'identité MLflow) |
+| `infra/modules/*.bicep` | Modules | Registre, Log Analytics, Key Vault, environnement, Container App, rôles |
+
+### Prérequis
+
+- Abonnement Azure, Azure CLI avec Bicep (`az bicep install`).
+- Une **inscription d'application Entra** (ID client) pour Easy Auth, avec l'URI de redirection `https://<fqdn>/.auth/login/aad/callback` de chaque application.
+- Le secret client de cette application déposé dans le Key Vault sous le nom **`entra-client-secret`** (le module Key Vault le référence comme ressource existante).
+
+### Ordre de déploiement
+
+Les noms ci-dessous reprennent `infra/main.parameters.json` (région `francecentral`) ; adaptez-les à votre environnement.
+
+```bash
+# 1. Socle : RG, ACR, Log Analytics, Key Vault, environnement, application (image d'attente)
+az deployment sub create --location francecentral \
+  --template-file infra/main.bicep --parameters infra/main.parameters.json \
+  --parameters tenantId=<tenant-id> deployerObjectId=$(az ad signed-in-user show --query id -o tsv)
+
+# 2. Déposer le secret client Entra dans Key Vault
+az keyvault secret set --vault-name kv-marso-dev-99ff --name entra-client-secret --value <secret>
+
+# 3. Construire les images dans ACR
+az acr build -r crmarsodev99ff -t robotics-demo:latest .
+az acr build -r crmarsodev99ff -t mlflow-server:latest mlflow-server
+az acr build -r crmarsodev99ff -t grafana-robotics:latest \
+  --build-arg SUBSCRIPTION_ID=$(az account show --query id -o tsv) grafana
+
+# 4. MLflow + Azure Files, puis Grafana et Evidently (portée groupe de ressources)
+az deployment group create -g rg-marso-dev-99ff --template-file infra/mlflow.bicep --parameters ...
+az deployment group create -g rg-marso-dev-99ff --template-file infra/grafana.bicep --parameters ...
+az deployment group create -g rg-marso-dev-99ff --template-file infra/evidently.bicep --parameters ...
+
+# 5. Redéployer le socle avec l'image réelle, Entra, l'ingress et le stockage MLflow
+az deployment sub create --location francecentral \
+  --template-file infra/main.bicep --parameters infra/main.parameters.json \
+  --parameters tenantId=<tenant-id> deployerObjectId=<object-id> \
+    containerImage=crmarsodev99ff.azurecr.io/robotics-demo:latest \
+    entraClientId=<client-id> enableIngress=true mlflowStorageName=<envStorageName>
+```
+
+Tant que `containerImage` vaut l'image d'attente Microsoft (`containerapps-helloworld`), l'ingress public, Easy Auth, les secrets et la sonde de santé sont désactivés : le premier déploiement crée le socle sans rien exposer. `envStorageName` est une sortie de `mlflow.bicep`. Les paramètres de chaque template sont déclarés en tête de fichier.
+
+Après la mise en place, les déploiements suivants passent uniquement par GitHub Actions.
+
+## CI/CD avec GitHub Actions
+
+| Workflow | Déclencheur | Étapes |
+| --- | --- | --- |
+| `ci.yml` | PR et branches hors `main` | Tests pytest, `pip-audit` (indicatif), compilation des 4 templates Bicep, build des 3 images Docker |
+| `deploy.yml` | Push sur `main` ou manuel | Tests → `az acr build` des 3 images → nouvelles révisions Container Apps (environnement GitHub `production`) → attente d'une révision **Healthy** et vérification de la redirection Entra → réentraînement optionnel |
+| `retrain.yml` | Lundi 03:00 UTC, manuel ou appelé par `deploy.yml` | Entraînement **dans le conteneur en production** via `az containerapp exec`, journalisé dans MLflow (hyperparamètres, description, tags `trigger`, `run_id`, `sha`) |
+
+Chaque image applicative est taguée par le SHA du commit et chaque révision reçoit un suffixe `g<run_id>`, ce qui rend chaque déploiement traçable jusqu'au run GitHub.
+
+**Variables du dépôt** (pas de secrets) : `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, `AZURE_REGISTRY_NAME`, `AZURE_APP_NAME`, `AZURE_MLFLOW_APP_NAME`, `AZURE_GRAFANA_APP_NAME`, `AZURE_EVIDENTLY_APP_NAME` (facultatif).
+
+## MLOps sur Azure
+
+- **Entraînement** : `POST /api/ml/train` ou le pipeline `train_anomaly_model` ; algorithmes `isolation_forest` (par défaut, non supervisé), `random_forest` (supervisé) ou `auto`. Le score est mesuré sur un découpage test stratifié.
+- **Promotion** : un candidat n'est promu que si **ROC AUC ≥ 0,75** et **F1 ≥ 0,5** ; sinon il est rejeté et ne remplace pas le modèle en service. Un seuil de décision optimal en F1 est aussi calculé sur le jeu d'entraînement, à titre informatif.
+- **Suivi MLflow** : dès que `MLFLOW_TRACKING_URI` est défini (sur Azure : `file:/mnt/mlflow/mlruns`), chaque entraînement journalise paramètres, métriques, seuils de promotion, statut, tags et une **model card** générée. `MLFLOW_PUBLIC_URL` ajoute un lien vers le run dans l'UI.
+- **Réentraînement planifié** : `retrain.yml` réentraîne chaque semaine dans le conteneur de production, avec les mêmes garde-fous de promotion.
+- **Dérive** : `POST /api/ml/predict` produit un rapport Evidently écrit dans `EVIDENTLY_WORKSPACE` (`/mnt/mlflow/evidently`), consultable dans l'application Evidently UI derrière Entra.
+- **Données réelles** : `tools/convert_ai4i.py` convertit le jeu public UCI **AI4I 2020** (maintenance prédictive, CC BY 4.0) au format de télémétrie de l'application ; `tools/tune_random_forest.py` en tire un balayage d'hyperparamètres (seuil choisi par validation croisée 5 plis, jeu test jamais utilisé pour la sélection). Le préréglage « Random Forest ajusté (AI4I) » des pipelines reprend la meilleure ligne de `tools/results/ai4i_random_forest_sweep.json`.
+
+## Observabilité sur Azure
+
+- **Grafana sur Container Apps** avec la source **Azure Monitor** par identité managée (`azureAuthType: msi`), provisionnée automatiquement. Le dashboard **« Robotics on Azure (Container Apps) »** affiche les requêtes, les réplicas actifs (0 = mis à l'échelle à zéro), le CPU, la mémoire et les journaux applicatifs récents (hors sondes de santé) issus de **Log Analytics**.
+- **Logs** : l'application écrit des événements JSON (ID de requête, durée, statut, ID d'exécution) sur la console et dans `logs/app.jsonl` ; Container Apps les envoie à Log Analytics.
+- **Santé** : sonde de disponibilité Container Apps sur `/api/health`, vérifiée aussi par le smoke test du déploiement.
+- **Métriques Prometheus** : `GET /metrics` reste disponible (HTTP, pipelines, modèles), utilisé par la stack Prometheus/Grafana locale.
+
+## Coûts et limites de l'environnement Azure
+
+- Toutes les Container Apps sont en **0→1 réplica** : pas de coût de calcul au repos, mais un **démarrage à froid** de plusieurs secondes au premier appel (le smoke test réessaie en conséquence).
+- Partage Azure Files limité à **5 Gio** ; ACR et Log Analytics sont facturés à l'usage.
+- **Stockage applicatif éphémère** : SQLite (`data/`) vit dans le conteneur. Le registre local des modèles et l'historique des pipelines sont **perdus à chaque redéploiement ou redémarrage** ; seuls MLflow et les snapshots Evidently, sur Azure Files, persistent. Une exécution interrompue est marquée en échec au redémarrage.
+- **Un seul réplica** par conception : l'ordonnanceur et les pipelines s'exécutent dans un seul processus, sans exécution distribuée.
+- MLflow utilise un store fichier, adapté à un environnement de démonstration, pas à une équipe nombreuse.
+- Pour éviter les coûts, supprimer le groupe de ressources : `az group delete -n <resource-group>`.
+
+---
+
+## Fonctionnalités de l'application
 
 ```text
 Navigateur (HTML/CSS/JS sans framework)
-        │ HTTP sur loopback uniquement
+        │ HTTP (loopback en local, Entra ID sur Azure)
         ▼
 Serveur Python standard (app.py)
    ├── CSV / JSONL → KPI en mémoire (robot_data.py)
    ├── Jeu synthétique → ZIP généré à la demande
-   └── Vidéo → OpenCV → MP4 téléchargé (video_privacy.py)
-        │
-        ├── Ordonnanceur à un processus → SQLite (operations.py)
-        ├── Logs JSONL avec rotation locale (observability.py)
-        ├── MLOps : scikit-learn → modèle versionné → API de prédiction
-        ├── Evidently : rapports de dérive sans conservation des données sources
-        └── Métriques Prometheus → Prometheus → dashboard Grafana provisionné
+   ├── Vidéo → OpenCV → MP4 anonymisé (video_privacy.py)
+   ├── Ordonnanceur à un processus → SQLite (operations.py)
+   ├── Pipelines de tâches type Airflow (pipelines.py)
+   ├── MLOps : scikit-learn → modèle versionné → API de prédiction (mlops.py)
+   ├── Suivi MLflow (experiment_tracking.py)
+   ├── Evidently : rapports de dérive sans conservation des données sources
+   └── Logs JSONL + métriques Prometheus (observability.py)
 ```
 
-Les journaux et vidéos importés ne sont pas conservés après la requête. Le jeu de démonstration est synthétique : 600 lignes de télémétrie, incidents JSONL, labels d'anomalie artificiels équilibrés à 5 % et une courte scène dessinée sans personne réelle. Le pipeline planifié est lui aussi une **démonstration synthétique** ; il analyse les événements et réévalue le candidat du modèle, sans surveiller un répertoire métier. SQLite conserve les exécutions (500) et les lots de prédiction (500). Les artefacts du modèle sont conservés à 3 versions promues maximum, les rapports Evidently à 500, les logs tournent sur quatre fichiers de 2 Mio (8 Mio) et Prometheus est retenu à 7 jours et 512 Mio. Docker est facultatif pour lancer l'application seule, mais requis pour Grafana, Prometheus et l'interface Evidently. L'environnement Python installé pour les tests occupe environ 0,8 Gio sur le PC utilisé pour cette validation. L'empreinte des images/cache Docker n'a pas pu être mesurée, car le moteur Docker n'était pas démarré ; pour vérifier le total sur votre PC après le premier démarrage, exécutez `docker system df`.
+Le jeu de démonstration est synthétique : 600 lignes de télémétrie, incidents JSONL, labels d'anomalie artificiels équilibrés à 5 % et une courte scène dessinée sans personne réelle. Les labels servent à tester le câblage, pas à démontrer une qualité sur des robots réels.
 
-## Démarrage sur Windows
+### API principales
 
-Python 3.10 à 3.12 64 bits est recommandé.
+- `GET /api/health` : disponibilité et état du scheduler.
+- `GET /api/operations` : fréquence, prochaine exécution, historique et logs récents.
+- `GET /metrics` : métriques Prometheus HTTP et pipeline, avec labels bornés.
+- `GET /api/ml/status` : modèle actif, dernières versions et lots prédits.
+- `POST /api/ml/train` : entraîne, évalue et promeut ou rejette un candidat.
+- `POST /api/ml/predict` : prédit sur un CSV avec `duration_ms`, `battery_pct`, `x_m`, `y_m` et crée un rapport Evidently.
+- `GET /api/pipelines`, `POST /api/pipelines/<nom>/run`, `GET /api/pipelines/runs[/<id>]` : pipelines et historique par tâche.
+
+### Orchestration et pipelines
+
+La section « Orchestration et supervision » lance le pipeline synthétique à la demande ou le planifie toutes les 1, 5, 15 ou 60 minutes (API : 60 s à 24 h). Un lancement concurrent du même job est refusé ; une exécution restée `running` après une interruption est marquée en échec.
+
+Le panneau « 6 · Pipelines » exécute de petits graphes de tâches qui réutilisent le code existant :
+
+| Pipeline | Tâches |
+| --- | --- |
+| `train_anomaly_model` | `validate_data` → `train` (suivi MLflow) → `evaluate` → `promote` |
+| `score_and_drift` | `validate_data` → `predict` → `drift_check` |
+| `analyze_logs` | `parse` → `incidents_kpis` |
+
+Corps de `POST /api/pipelines/<nom>/run` : `{params, filename?, content?}` (CSV/JSONL ≤ 25 Mo, paramètres validés par liste blanche). Une seule exécution à la fois (`409` sinon), délai maximal de 30 min. Si une tâche échoue, ses descendantes passent `skipped` (`upstream_failed`). Métriques : `robotics_pipeline_runs_total{pipeline,status}`, `robotics_pipeline_run_duration_seconds`, `robotics_pipeline_active`. Les 50 dernières exécutions sont gardées en mémoire, les 200 dernières dans `data/mlops.sqlite3`.
+
+L'ordonnanceur maison est volontairement limité à un processus : ni retry configurable, ni exécution distribuée, ni dépendances inter-jobs, ni alerte externe.
+
+### Formats et traitement
+
+- CSV avec colonnes recommandées `timestamp`, `robot_id`, `event`, `duration_ms`, `battery_pct`, `x_m`, `y_m` (plus `is_anomaly` pour l'entraînement).
+- JSONL avec un objet JSON par ligne ; maximum 25 Mo et 200 000 lignes par analyse.
+- Vidéo MP4, AVI, MOV ou MKV, maximum 250 Mo ; résultat en MP4 à télécharger.
+- Profil qualité : horodatages, identifiants robot et types d'événement manquants, batteries hors 0–100, durées négatives. Ce sont des alertes descriptives, sans correction automatique.
+
+### Anonymisation vidéo
+
+Pixelisation des visages détectés par **YuNet** (OpenCV Zoo, licence MIT, ~233 Ko, vérifié par SHA-256 et mis en cache dans `data/models/`) : seuil de confiance 0,35, quatre recadrages agrandis par image, passe CLAHE sur les images sombres, marges autour des visages, suivi court (0,25 s) pour combler les détections manquées, mosaïque plafonnée à 8 blocs par côté.
+
+**Confidentialité :** la détection peut manquer des visages masqués, minuscules, flous ou de profil. L'anonymisation automatique seule ne garantit pas la conformité RGPD : inspecter la vidéo image par image et conserver l'original dans un espace restreint. Les vidéos ne sont jamais envoyées vers un service tiers.
+
+Un banc d'essai reproductible sur un proxy **WIDER FACE** compare YuNet et SCRFD, les seuils, le tuilage et le suivi, avec journalisation MLflow (`tools/face_blur_benchmark.py`, résultats dans `tools/results/`). Méthode, résultats et limites : [docs/face-blur-experiments.md](docs/face-blur-experiments.md). La configuration SCRFD retenue est une comparaison de recherche (poids InsightFace non commerciaux), pas une recommandation de production ; la production reste sur YuNet.
+
+Références :
+
+- Bajpai, R. & Aravamuthan, B. (2026). [SecurePose: Automated face blurring and human movement kinematics extraction from videos recorded in clinical settings](https://doi.org/10.1038/s41598-026-50340-5), *Scientific Reports*, 16.
+- Wu, W., Peng, H. & Yu, S. (2023). [YuNet: A Tiny Millisecond-level Face Detector](https://doi.org/10.1007/s11633-023-1423-y), *Machine Intelligence Research*, 20, 656–665.
+- [OpenCV Zoo — YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet).
+
+---
+
+## Mode local (Windows)
+
+Le même code fonctionne sans compte cloud : SQLite, artefacts de modèles et rapports Evidently restent locaux, et l'interface n'écoute que sur `127.0.0.1`. Python 3.10 à 3.12 64 bits est recommandé.
 
 ```powershell
 py -3.12 -m venv .venv
@@ -34,17 +266,11 @@ python -m pip install -r requirements.txt
 python app.py
 ```
 
-Ouvrir <http://127.0.0.1:8765>. Pour choisir un autre port, définir `ROBOTICS_DEMO_PORT` avant `python app.py`. Pour télécharger des échantillons, cliquer sur « Générer et télécharger le jeu de test » ; le ZIP produit contient le CSV, le JSONL, la vidéo AVI et un descriptif. Le ZIP est construit à la demande, pas stocké sur disque.
+Ouvrir <http://127.0.0.1:8765> (port modifiable avec `ROBOTICS_DEMO_PORT`). Le bouton « Générer et télécharger le jeu de test » produit à la demande un ZIP avec le CSV, le JSONL, une vidéo AVI et un descriptif.
 
-Par défaut, les requêtes POST n'acceptent que les hôtes locaux. Derrière un ingress Azure, définir `ROBOTICS_DEMO_ALLOWED_HOSTS` avec les noms d'hôte exacts autorisés, séparés par des virgules. Les origines de navigateur doivent utiliser l'un de ces mêmes hôtes ; aucun joker n'est pris en charge.
+### Stack locale avec Docker Compose
 
-### Télécharger une vidéo par lien direct
-
-Le script autonome `download_video.py` accepte une URL HTTPS directe vers un fichier vidéo (.mp4, .webm, .mov, .avi, .mkv ou .m4v), de 250 Mo maximum. Lancer `python download_video.py` puis coller cette URL ; le fichier est enregistré dans `downloads/`. Il ne télécharge pas les pages YouTube (`youtu.be` inclus) et ne contourne pas les restrictions d'une plateforme. Téléchargez uniquement des fichiers que vous êtes autorisé à obtenir.
-
-### Stack MLOps avec Docker Compose
-
-Le mode Compose démarre l'application, Prometheus, Grafana et Evidently. Les ports sont liés uniquement à l'interface locale Windows :
+Équivalent local de l'environnement Azure, avec Prometheus à la place d'Azure Monitor :
 
 ```powershell
 docker compose up --build -d
@@ -52,74 +278,36 @@ docker compose ps
 ```
 
 - Application : <http://127.0.0.1:8765>
-- Grafana (identifiants initiaux `admin` / `admin`, à changer à la première connexion) : <http://127.0.0.1:3000>
+- Grafana (`admin` / `admin`, à changer à la première connexion) : <http://127.0.0.1:3000>
 - Prometheus : <http://127.0.0.1:9090>
 - Evidently : <http://127.0.0.1:8000>
 
-Le dashboard ** Robotics MLOps**, sa source Prometheus et trois règles d'alerte (application indisponible, aucun modèle promu, pipeline en échec récent) sont provisionnés automatiquement. Prometheus affiche l'état des alertes, mais aucun Alertmanager ni canal de notification n'est inclus dans ce prototype. Arrêt sans supprimer les volumes :
+Le dashboard **Robotics MLOps**, sa source Prometheus et trois règles d'alerte (application indisponible, aucun modèle promu, pipeline en échec récent) sont provisionnés automatiquement ; aucun Alertmanager n'est inclus. Arrêt sans perte des volumes : `docker compose down` (éviter `down -v`). Rétention locale : 500 exécutions et 500 lots de prédiction dans SQLite, 3 modèles promus, 500 rapports Evidently, logs en rotation sur 4 × 2 Mio, Prometheus à 7 jours / 512 Mio. Vérifier l'espace Docker avec `docker system df`.
 
-```powershell
-docker compose down
+### Télécharger une vidéo par lien direct
+
+`python download_video.py` accepte une URL HTTPS directe vers un fichier vidéo (.mp4, .webm, .mov, .avi, .mkv, .m4v) de 250 Mo maximum et l'enregistre dans `downloads/`. Il ne télécharge pas les pages YouTube et ne contourne pas les restrictions des plateformes. Téléchargez uniquement des fichiers que vous êtes autorisé à obtenir.
+
+## Structure du dépôt
+
+```text
+.github/workflows/   ci.yml, deploy.yml, retrain.yml
+infra/               main.bicep (abonnement), mlflow/grafana/evidently.bicep, modules/
+mlflow-server/       Image du serveur MLflow pour Container Apps
+grafana/             Image Grafana Azure (source Azure Monitor, dashboard Container Apps)
+monitoring/          Prometheus, alertes et Grafana pour la stack locale
+app.py               Serveur HTTP et API
+mlops.py             Entraînement, promotion, prédiction, dérive
+experiment_tracking.py  Journalisation MLflow et model cards
+pipelines.py         Graphes de tâches
+operations.py        Ordonnanceur et historique
+observability.py     Logs JSON et métriques Prometheus
+robot_data.py        Analyse CSV/JSONL et jeu synthétique
+video_privacy.py     Anonymisation vidéo (YuNet)
+tools/               AI4I, tuning Random Forest, banc d'essai floutage, rejeu MLflow
+docs/                Expériences de floutage
+tests/               Tests pytest
 ```
-
-Les données de l'application sont dans `data/`, les logs dans `logs/`, les volumes Grafana et Prometheus sont nommés et persistants. Ne pas utiliser `docker compose down -v` sauf si la suppression des données de monitoring est voulue. Le démarrage Compose construit une image Python avec OpenCV, scikit-learn et Evidently, puis télécharge Grafana et Prometheus : surveiller l'espace disque Docker Desktop et supprimer manuellement les ressources inutilisées après confirmation. La limite Prometheus porte sur sa base TSDB, pas sur l'espace réservé par le disque virtuel Docker.
-
-## Orchestration et observabilité locales
-
-La section « Orchestration et supervision » permet de lancer le pipeline synthétique à la demande ou de le planifier toutes les 1, 5, 15 ou 60 minutes. L'intervalle accepté par l'API est de 60 secondes à 24 heures. Désactiver le planning n'arrête pas une exécution déjà démarrée ; un lancement concurrent du même job est refusé. La configuration survit au redémarrage. Au redémarrage après une interruption pendant un job, l'exécution restée `running` est marquée en échec et journalisée ; aucune reprise automatique des données n'est prétendue.
-
-- `GET /api/health` : disponibilité et état du scheduler.
-- `GET /api/operations` : fréquence, prochaine exécution, historique et logs récents. Les requêtes GET de rafraîchissement de cette route restent mesurées dans Prometheus, mais ne sont pas ajoutées aux logs JSON pour éviter que la consultation des journaux ne les modifie elle-même.
-- `GET /metrics` : métriques Prometheus HTTP et pipeline, avec labels bornés (route, méthode, statut, job, état).
-- `GET /api/ml/status` : modèle actif, dernières versions et lots prédits.
-- `POST /api/ml/train` : entraîne/évalue l'Isolation Forest sur le CSV synthétique ; seuils de promotion AUC ≥ 0,75 et F1 ≥ 0,5.
-- `POST /api/ml/predict` : prédit sur un CSV avec `duration_ms`, `battery_pct`, `x_m`, `y_m` et crée un rapport Evidently de dérive.
-- Interface Evidently : snapshots de dérive stockés dans `data/evidently/`, avec `include_data=False` pour ne pas archiver les lignes importées. Sur Azure, `EVIDENTLY_WORKSPACE` place ces snapshots sur le partage Azure Files de MLflow (`/mnt/mlflow/evidently`) et l'application `infra/evidently.bicep` les affiche derrière la connexion Entra (mise à l'échelle à zéro).
-- `logs/app.jsonl` : événements JSON horodatés incluant ID de requête, durée, statut HTTP ou ID/durée d'exécution. Aucun contenu des fichiers importés ni données de télémétrie n'est inscrit dans les logs.
-- `data/operations.sqlite3` : configuration et historique synthétique des runs.
-- `data/mlops.sqlite3` et `data/models/` : registre local, métriques d'évaluation et 3 artefacts de modèles promus maximum.
-
-L'entraînement exige une colonne `is_anomaly` contenant les classes 0 et 1. Le score est mesuré sur un découpage test stratifié ; un candidat qui n'atteint pas les seuils reste rejeté et ne remplace pas le modèle en service. Les labels du jeu fourni sont artificiels et servent uniquement à tester le câblage, pas à démontrer la qualité sur des robots réels. L'Isolation Forest et le seuil de contamination doivent être recalibrés avec un jeu de référence annoté représentatif avant usage opérationnel. Evidently détecte des changements de distribution, pas une dérive causale ni une dégradation de qualité certaine.
-
-L'ordonnanceur maison est délibérément limité à **un processus sur un seul PC** : il n'a ni retry configurable, ni exécution distribuée, ni gestion de dépendances de tâches, ni alerte externe. Il convient pour essayer les concepts sur Windows, pas pour coordonner des pipelines de production.
-
-### Panneau « 6 · Pipelines »
-
-Un panneau léger de type Airflow (sans Airflow) lance à la demande de petits graphes de tâches (`pipelines.py`) qui réutilisent le code existant, et affiche l'état de chaque tâche (en attente, en cours, réussi, échec, ignoré), les durées, les sorties et les métriques :
-
-| Pipeline | Tâches |
-| --- | --- |
-| `train_anomaly_model` | `validate_data` → `train` (suivi MLflow dans l'entraînement existant) → `evaluate` → `promote` |
-| `score_and_drift` | `validate_data` → `predict` → `drift_check` |
-| `analyze_logs` | `parse` → `incidents_kpis` |
-
-- `GET /api/pipelines` : définitions, paramètres, préréglages, dernière exécution. Le préréglage `Random Forest ajusté (AI4I)` reprend la meilleure ligne de `tools/results/ai4i_random_forest_sweep.json` et joint ce balayage comme artefact `tuning_results` quand un CSV étiqueté est fourni.
-- `POST /api/pipelines/<nom>/run` : corps `{params, filename?, content?}` (CSV/JSONL ≤ 25 Mo, paramètres validés par liste blanche). Une seule exécution à la fois : `409` si une autre est active. Une tâche en cours n'est pas annulable ; un délai maximal par exécution (30 min) ignore les tâches restantes.
-- `GET /api/pipelines/runs` et `GET /api/pipelines/runs/<id>` : historique et détail par tâche. Si une tâche échoue, ses descendantes sont `skipped` (`upstream_failed`). Les erreurs renvoyées sont assainies (pas de trace d'appel).
-- Métriques Prometheus : `robotics_pipeline_runs_total{pipeline,status}`, `robotics_pipeline_run_duration_seconds` et `robotics_pipeline_active`.
-- `MLFLOW_PUBLIC_URL` (http/https), si défini, ajoute un lien MLflow ; sinon seuls l'expérience et l'identifiant de run sont affichés.
-
-**Historique éphémère** : les 50 dernières exécutions sont gardées en mémoire et les 200 dernières dans `data/mlops.sqlite3` (table `pipeline_runs`). Sur Azure Container Apps, ce stockage est éphémère : l'historique est perdu à un redéploiement ou redémarrage, et une exécution interrompue est marquée en échec au redémarrage. Les tâches `evaluate` et `promote` rapportent le résultat de l'entraînement existant (la promotion est décidée dans `MLOpsService.train`).
-
-## Formats et traitement
-
-- CSV avec colonnes recommandées `timestamp`, `robot_id`, `event`, `duration_ms`, `battery_pct`, `x_m`, `y_m`.
-- JSONL avec un objet JSON par ligne. Les colonnes optionnelles manquantes sont ignorées ; maximum 25 Mo et 200 000 lignes par analyse.
-- Vidéo MP4, AVI, MOV ou MKV, maximum 250 Mo ; le résultat est un MP4 à télécharger.
-- Pixelisation des visages détectés par YuNet (OpenCV Zoo), sur chaque image et quatre recadrages agrandis, avec un seuil de confiance de 0,35 et suppression des détections en double. Sur les images sombres (luminance moyenne < 90), une passe supplémentaire est faite sur une copie rehaussée par CLAHE. Une marge (20 % sur les côtés, 25 % en haut et en bas) protège les contours autour de chaque visage. Un suivi par recouvrement des boîtes extrapole brièvement le mouvement et conserve le masque jusqu'à 0,25 s (au moins 2 images) après une détection pour combler des images manquées. Les zones éloignées des visages restent nettes. La mosaïque est plafonnée à 8 blocs par côté afin que les grands visages restent méconnaissables. Cette recherche multi-échelle augmente le temps de traitement. Le modèle ONNX (~233 Ko) est téléchargé au premier traitement visage, vérifié par SHA-256 et réutilisé depuis `data/models/`.
-- Le profil qualité compte les horodatages, identifiants robot et types d'événement manquants, ainsi que les batteries hors de l'intervalle 0–100 et les durées négatives. Ce sont des alertes descriptives ; aucun seuil métier ni correction automatique n'est inféré.
-
-**Important — confidentialité :** YuNet est plus robuste que l'ancien classificateur Haar frontal, mais peut encore manquer les visages masqués, minuscules, flous, de profil extrême ou hors champ. La marge et le maintien temporel couvrent les contours et de courtes pertes de détection, mais ne retrouvent pas un visage jamais détecté et peuvent laisser un masque brièvement à l'emplacement prédit après la sortie du visage. Les zones éloignées des visages restent nettes. L'anonymisation automatique seule ne garantit pas la conformité RGPD : inspecter toute la vidéo image par image et conserver l'original dans un espace restreint. Le prototype ne collecte pas de biométrie et n'envoie pas les vidéos au cloud ; seul le poids YuNet peut être téléchargé du dépôt OpenCV Zoo.
-
-### Choix du détecteur et références scientifiques
-
-La requête Google Scholar fournie met notamment en avant SecurePose (Bajpai & Aravamuthan, *Scientific Reports*, 2026). Sur 116 vidéos cliniques de marche d'enfants atteints de paralysie cérébrale, l'article rapporte que son système dépasse six méthodes de détection comparées, avec une précision de désidentification comparable à un floutage manuel et un temps inférieur de 91,08 %. Ce résultat concerne des vidéos cliniques et ne garantit pas les mêmes performances sur des caméras d'entrepôt. Il confirme surtout l'importance d'évaluer la détection sur le domaine et les séquences réels, plutôt que de compter sur un filtre de flou seul.
-
-Pour rester léger, hors ligne après le premier téléchargement et simple à installer sur Windows, le prototype utilise YuNet via l'API DNN intégrée à OpenCV au lieu d'ajouter un framework de modèles et plusieurs centaines de mégaoctets de poids. OpenCV Zoo publie un modèle YuNet MIT de 232 589 octets ; sa fiche rapporte AP 0,8844 (facile), 0,8656 (moyen) et 0,7503 (difficile) sur WIDER Face. Le seuil de confiance a été abaissé à 0,35 et quatre recadrages agrandis par image visent à mieux couvrir les petits visages ; le coût est jusqu'à six inférences par image (avec la passe basse lumière) et davantage de faux positifs possibles. Ces choix ne sont pas une mesure de rappel sur la vidéo fournie : il faut les comparer sur des images annotées du domaine réel. L'extension des rectangles et la mosaïque visent à réduire les contours non protégés autour des détections ; elles ne peuvent pas compenser une détection manquée.
-
-- Bajpai, R. & Aravamuthan, B. (2026). [SecurePose: Automated face blurring and human movement kinematics extraction from videos recorded in clinical settings](https://doi.org/10.1038/s41598-026-50340-5), *Scientific Reports*, 16. [Notice et résumé indexés par Crossref](https://api.crossref.org/works/10.1038/s41598-026-50340-5).
-- Wu, W., Peng, H. & Yu, S. (2023). [YuNet: A Tiny Millisecond-level Face Detector](https://doi.org/10.1007/s11633-023-1423-y), *Machine Intelligence Research*, 20, 656–665.
-- [OpenCV Zoo — YuNet, modèle, résultats et licence MIT](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet).
 
 ## Tests
 
@@ -128,47 +316,31 @@ python -m pip install pytest
 python -m pytest -q
 ```
 
-## CI/CD (GitHub Actions)
+Les mêmes tests conditionnent chaque déploiement Azure dans `deploy.yml`.
 
-- `ci.yml` (PR et branches hors `main`) : tests, compilation Bicep, build Docker.
-- `deploy.yml` (push sur `main`) : tests → build ACR → déploiement (environnement `production`) → vérification de santé et redirection Entra ; réentraînement optionnel (`workflow_dispatch`).
-- `retrain.yml` (lundi 03:00 UTC ou manuel) : entraîne dans le conteneur et journalise dans MLflow (hyperparamètres, description).
-- Connexion Azure par OIDC, sans secret : variables du dépôt `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, `AZURE_REGISTRY_NAME`, `AZURE_APP_NAME`, `AZURE_GRAFANA_APP_NAME`, `AZURE_EVIDENTLY_APP_NAME` (facultatif). L'application Entra a le rôle Contributeur sur le groupe de ressources uniquement.
+## Architecture cible pour plusieurs To/jour
 
-## Proposition d'architecture cible pour plusieurs To/jour
+Ce prototype n'est **pas** un pipeline de production à plusieurs To/jour. En gardant le même contrat de données, chaque composant peut évoluer séparément, en services managés Azure ou en open source :
 
-Ce prototype n'est **pas** le pipeline de production : un serveur Python local et des fichiers ZIP ne peuvent pas absorber durablement plusieurs To/jour. Conserver le même contrat de données, puis faire évoluer les composants séparément :
-
-| Besoin | Option open source | Responsabilité |
+| Besoin | Option Azure managée | Option open source |
 | --- | --- | --- |
-| Ingestion robot → site | MQTT (EMQX ou Mosquitto) + Redpanda/Kafka | Buffer, partitionnement par site/robot, rejeu et contrôle de débit |
-| Données brutes immuables | MinIO/S3 on-prem + Apache Iceberg | Zone bronze, rétention, chiffrement, catalogue et évolution de schéma |
-| Traitements batch/stream | Apache Flink (streaming) et Spark (batch) | Validation, déduplication, enrichissement et données argent/or |
-| Orchestration | Dagster | Pipelines idempotents, reprises, suivi des jeux et versions de traitement |
-| SQL et séries temporelles | Trino + PostgreSQL/TimescaleDB | Analyse exploratoire, métadonnées, états récents et KPI |
-| Plateforme équipe | FastAPI + React ou Vue, RBAC OIDC | API opérationnelle, recherches, annotations et exports |
-| Observabilité | OpenTelemetry + Prometheus + Grafana | Latence, retard de consommation, qualité, coûts et alertes |
-| Anonymisation vidéo | FFmpeg + détecteur de visages validé/déployé localement, file de quarantaine | Zones d'accès restreint, revue humaine, traçabilité et règles de rétention |
+| Ingestion robot → cloud | Azure IoT Hub / Event Hubs | MQTT (EMQX, Mosquitto) + Kafka/Redpanda |
+| Données brutes immuables | ADLS Gen2 + Delta Lake | MinIO + Apache Iceberg |
+| Traitements batch/stream | Azure Databricks, Stream Analytics | Spark, Flink |
+| Orchestration | Azure Data Factory, Databricks Workflows | Dagster, Airflow |
+| Entraînement et registre de modèles | Azure Machine Learning (MLflow managé) | MLflow sur base SQL |
+| SQL et séries temporelles | Azure Data Explorer, PostgreSQL Flexible Server | Trino + TimescaleDB |
+| Observabilité | Azure Monitor, Application Insights, Managed Grafana | OpenTelemetry + Prometheus + Grafana |
+| Anonymisation vidéo | Conteneurs GPU / AKS avec file de quarantaine | FFmpeg + détecteur validé localement |
 
-À plusieurs To/jour, le débit, la rétention, le nombre de sites, la connectivité, la politique de conservation vidéo et les exigences RGPD déterminent le dimensionnement. Ne pas promettre une capacité chiffrée avant un test de charge avec des profils représentatifs ; garder les objets vidéo dans le stockage objet et leur index/métadonnées dans le SQL.
+Le débit, la rétention, le nombre de sites, la connectivité, la politique de conservation vidéo et les exigences RGPD déterminent le dimensionnement. Ne pas promettre une capacité chiffrée avant un test de charge représentatif ; garder les vidéos en stockage objet et leurs métadonnées en SQL.
 
 ### Pratiques retenues et sources consultées (23 octobre 2026)
 
-- **Instrumentation en trois signaux complémentaires :** logs pour les événements explicables, métriques pour les tendances/alertes et traces pour relier les étapes d'une requête ou d'un pipeline distribué. Le prototype a les logs JSON, les durées et compteurs Prometheus ; les traces distribuées ne sont pas justifiées dans ce processus local à un service.
-  - [OpenTelemetry — Signals](https://opentelemetry.io/docs/concepts/signals/)
-  - [OpenTelemetry — Logs Data Model](https://opentelemetry.io/docs/specs/otel/logs/data-model/)
-- **Mesures adaptées aux jobs batch :** état de la dernière réussite, runtime, dernière fin même en échec, volumes traités et durée des étapes. Prometheus recommande en plus un heartbeat de bout en bout pour déceler un flux bloqué ; ce prototype n'a pas de flux entrant, donc le heartbeat est à ajouter avec l'ingestion réelle.
-  - [Prometheus — Instrumentation practices](https://prometheus.io/docs/practices/instrumentation/)
-  - [Prometheus — Metric naming](https://prometheus.io/docs/practices/naming/)
-- **Planification et fraîcheur des données :** Dagster documente l'automatisation de jobs et les politiques d'asset freshness, tandis qu'Airflow permet de déclencher des DAGs sur la mise à jour d'assets plutôt qu'uniquement sur une horloge. Pour la production, préférer des déclenchements sur disponibilité des données et des seuils de retard, en plus du cron.
-  - [Dagster — Schedules](https://docs.dagster.io/guides/automate/schedules)
-  - [Dagster — Asset freshness policies](https://docs.dagster.io/guides/observe/asset-freshness-policies)
-  - [Apache Airflow — Asset-aware scheduling](https://airflow.apache.org/docs/apache-airflow/stable/authoring-and-scheduling/asset-scheduling.html)
-- **Qualité mesurable et tests préventifs :** dbt décrit l'association de contrôles proactifs des transformations avec l'observabilité des incidents de données.
-  - [dbt Labs (25 août 2025) — Building resilience: Observability for modern data teams](https://www.getdbt.com/blog/data-observability)
-- **Travaux scientifiques très récents :** « Implementation Guidelines for Data Quality Metrics » (Jung et al., 7 octobre 2026) propose de rendre exécutables des métriques ISO de qualité et de distinguer les contrôles généralisables, paramétrés par des références propres, et ceux nécessitant un jugement humain. Il s'agit d'un **préprint arXiv soumis à EDBT 2027, pas d'un article évalué par les pairs publié** à la date de cette revue ; il motive ici de rendre les règles de qualité explicites et de ne pas apprendre de seuils sur le jeu synthétique.
-  - [arXiv:2610.10919](https://arxiv.org/abs/2610.10919)
-- **Surveillance en ligne des séries temporelles :** « TSGuard » (arXiv, octobre 2026) décrit une boucle de détection des valeurs absentes/retardées, validation par contraintes physiques, puis décision explicite de conserver ou corriger. Le preprint indique une présentation CIKM '26 à venir ; ce n'est pas une publication déjà parue au 23 octobre 2026.
-  - [arXiv:2610.03147](https://arxiv.org/abs/2610.03147)
+- **Trois signaux complémentaires** (logs, métriques, traces) : [OpenTelemetry — Signals](https://opentelemetry.io/docs/concepts/signals/), [Logs Data Model](https://opentelemetry.io/docs/specs/otel/logs/data-model/). Le prototype a les logs et les métriques ; les traces distribuées ne se justifient pas pour un service unique.
+- **Mesures adaptées aux jobs batch** (dernière réussite, durée, volumes, heartbeat de bout en bout) : [Prometheus — Instrumentation](https://prometheus.io/docs/practices/instrumentation/), [Metric naming](https://prometheus.io/docs/practices/naming/).
+- **Déclenchement sur la fraîcheur des données** plutôt que sur l'horloge seule : [Dagster — Schedules](https://docs.dagster.io/guides/automate/schedules), [Asset freshness policies](https://docs.dagster.io/guides/observe/asset-freshness-policies), [Airflow — Asset-aware scheduling](https://airflow.apache.org/docs/apache-airflow/stable/authoring-and-scheduling/asset-scheduling.html).
+- **Qualité mesurable et tests préventifs** : [dbt Labs (25 août 2025) — Observability for modern data teams](https://www.getdbt.com/blog/data-observability) (source fournisseur).
+- **Travaux récents (préprints, non évalués par les pairs au 23 octobre 2026)** : Jung et al., « Implementation Guidelines for Data Quality Metrics », [arXiv:2610.10919](https://arxiv.org/abs/2610.10919) (soumis à EDBT 2027) ; « TSGuard », [arXiv:2610.03147](https://arxiv.org/abs/2610.03147) (CIKM '26 à venir).
 
-Ces sources étayent des motifs d'ingénierie, pas un dimensionnement de capacité : les préprints ne valent pas validation industrielle et l'article dbt est une source fournisseur, non une étude indépendante. Pour les données robot réelles, définir avec les équipes des contrôles de plausibilité physique (batterie, vitesses, cadence, horodatage, synchronisation) et faire valider leurs seuils avant de déclencher automatiquement des corrections.
+Ces sources étayent des motifs d'ingénierie, pas un dimensionnement. Pour des données robot réelles, définir avec les équipes des contrôles de plausibilité physique (batterie, vitesses, cadence, horodatage, synchronisation) et faire valider leurs seuils avant toute correction automatique.
