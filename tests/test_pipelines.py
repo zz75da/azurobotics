@@ -203,7 +203,7 @@ def test_tuning_results_are_embedded_only_for_preset_with_uploaded_csv(tmp_path)
     content, options = mlops.train_calls[0]
     assert content == csv
     assert len(options["tuning_results"]) > 10
-    assert options["hyperparameters"]["decision_threshold"] == 0.32
+    assert options["hyperparameters"]["decision_threshold"] == pipelines.PRESETS[pipelines.TUNED_PRESET]["hyperparameters"]["decision_threshold"]
     assert options["run_tags"]["pipeline_run"] == run["id"]
     assert [task["status"] for task in run["tasks"]] == ["success"] * 4
     assert run["summary"]["promotion"] == "promoted" and run["summary"]["mlflow_run_id"] == "abc123"

@@ -12,14 +12,23 @@ columns, so the real sensor values are stored in them as follows:
     y_m          <- Tool wear [min]
     is_anomaly   <- Machine failure (0/1)
 
-The column names are only containers: the values are real machine data, not robot battery or
-position. Dataset: https://archive.ics.uci.edu/dataset/601 (Matzka, 2020), licence CC BY 4.0.
+Five extra columns, which the model uses when present, carry the rest of the signal:
+
+    air_temp_k    <- Air temperature [K]
+    temp_delta_k  <- Process temperature - Air temperature
+    power_w       <- Torque x angular speed
+    wear_torque   <- Tool wear x Torque
+    type_code     <- Product type (L=0, M=1, H=2)
+
+The four generic column names are only containers: the values are real machine data, not robot
+battery or position. Dataset: https://archive.ics.uci.edu/dataset/601 (Matzka, 2020), licence CC BY 4.0.
 """
 from __future__ import annotations
 
 import argparse
 import csv
 import io
+import math
 import sys
 import urllib.request
 import zipfile
@@ -27,7 +36,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 URL = "https://archive.ics.uci.edu/static/public/601/ai4i+2020+predictive+maintenance+dataset.zip"
-HEADER = ("timestamp", "robot_id", "event", "duration_ms", "battery_pct", "x_m", "y_m", "is_anomaly")
+HEADER = (
+    "timestamp", "robot_id", "event", "duration_ms", "battery_pct", "x_m", "y_m",
+    "air_temp_k", "temp_delta_k", "power_w", "wear_torque", "type_code", "is_anomaly",
+)
+TYPE_CODES = {"L": 0, "M": 1, "H": 2}
 
 
 def load_source(path: str | None) -> str:
@@ -48,6 +61,8 @@ def convert(source: str, limit: int | None = None) -> str:
         if limit is not None and index >= limit:
             break
         timestamp = (start + timedelta(minutes=int(row["UDI"]))).strftime("%Y-%m-%dT%H:%M:%SZ")
+        speed, torque = float(row["Rotational speed [rpm]"]), float(row["Torque [Nm]"])
+        air, process = float(row["Air temperature [K]"]), float(row["Process temperature [K]"])
         writer.writerow(
             (
                 timestamp,
@@ -57,6 +72,11 @@ def convert(source: str, limit: int | None = None) -> str:
                 row["Torque [Nm]"],
                 row["Process temperature [K]"],
                 row["Tool wear [min]"],
+                row["Air temperature [K]"],
+                round(process - air, 1),
+                round(torque * speed * 2 * math.pi / 60, 1),
+                round(float(row["Tool wear [min]"]) * torque, 1),
+                TYPE_CODES[row["Type"]],
                 int(row["Machine failure"]),
             )
         )
