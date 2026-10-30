@@ -1,4 +1,60 @@
-# Marso Robotics — Data Lab local
+# Robotics Data Lab
+
+**Detect machine failures before they stop production, and keep the model healthy once deployed.**
+
+> **In English.** An end-to-end MLOps project on Azure: anomaly detection on machine and robot telemetry, face anonymisation for video, experiment tracking with MLflow, drift monitoring with Evidently, and automated retraining. Everything runs on Azure Container Apps behind Microsoft Entra ID, is defined in Bicep, and is deployed by GitHub Actions with OIDC (no stored cloud secret). On the public AI4I 2020 dataset, feature engineering raised the held-out F1 from 0.52 to 0.88.
+
+**Stack :** Python, scikit-learn, MLflow, Evidently, OpenCV (YuNet), Azure Container Apps, Bicep, GitHub Actions, Grafana, Prometheus. Licence : [MIT](LICENSE).
+
+![Architecture sur Azure](docs/images/architecture.png)
+
+## Problème métier et résultats
+
+Un arrêt machine non planifié coûte plus cher qu'une intervention préparée. L'objectif est de signaler les cycles à risque à partir des capteurs, avec assez de précision pour que les alertes restent crédibles. Les pannes sont rares : 3,39 % des 10 000 lignes d'[AI4I 2020](https://archive.ics.uci.edu/dataset/601) (UCI, CC BY 4.0). Un modèle qui répond toujours « pas de panne » atteint donc 96,6 % d'accuracy sans rien détecter. C'est pourquoi le projet suit le F1, la précision et le rappel, et non l'accuracy.
+
+Résultats sur le jeu de test (25 %, stratifié, jamais utilisé pour choisir la configuration ni le seuil) :
+
+| Random Forest sur AI4I | AUC | F1 | Précision | Rappel |
+| --- | --- | --- | --- | --- |
+| 4 colonnes d'origine ([balayage](tools/results/ai4i_random_forest_sweep_baseline.json)) | 0,957 | 0,52 | 0,76 | 0,40 |
+| 9 colonnes, dont 5 ajoutées ([balayage](tools/results/ai4i_random_forest_sweep.json)) | 0,981 | **0,88** | 0,96 | 0,81 |
+
+Sur 85 pannes du jeu de test, le modèle en détecte 81 % contre 40 % auparavant. Les colonnes ajoutées sont la puissance (couple × vitesse angulaire), l'écart de température process/air, l'usure × couple, la température de l'air et le type de produit. La configuration est retenue par F1 en validation croisée 5 plis sur l'entraînement uniquement, parmi 108 combinaisons.
+
+**À lire avec ces chiffres :** AI4I est un jeu de données *synthétique*, dont les pannes suivent des règles publiées (dissipation thermique, puissance, surcharge). Les nouvelles colonnes se rapprochent de ces règles, ce qui explique l'ampleur du gain. Sur de vraies machines, l'écart serait probablement plus faible.
+
+**Floutage des visages :** sur un proxy WIDER FACE de 4 images sources réservées au test, YuNet (en production) laisse 25,0 % de visages insuffisamment couverts à 90 % de couverture, et la meilleure configuration expérimentale SCRFD 2,8 %, au prix de 100 % de faux masques. Cet échantillon est trop petit pour conclure, et les poids SCRFD sont réservés à la recherche non commerciale : ils ne sont pas en production. Détails dans [docs/face-blur-experiments.md](docs/face-blur-experiments.md).
+
+![Interface du Data Lab](docs/images/ui.png)
+
+## Reproduire le résultat AI4I
+
+```powershell
+python tools/convert_ai4i.py --output ai4i_telemetry.csv
+python tools/tune_random_forest.py --input ai4i_telemetry.csv --output sweep_results.json
+```
+
+Dans le panneau « 6 · Pipelines », choisir ensuite `train_anomaly_model`, le préréglage `Random Forest ajusté (AI4I)` et le CSV converti.
+
+## Monitoring et réentraînement
+
+Chaque lot prédit reçoit un rapport de dérive Evidently. Si au moins 50 % des colonnes dérivent sur un lot d'au moins 100 lignes, l'application déclenche `retrain.yml` par `workflow_dispatch`, au plus une fois par 24 h (`RETRAIN_COOLDOWN_HOURS`). Le résultat apparaît dans la réponse de prédiction (`drift_share`, `drift_detected`, `retrain`) et dans la tâche `drift_check`. Prometheus expose `robotics_ml_drift_share` et `robotics_ml_retrain_triggers_total`.
+
+Le déclenchement est désactivé par défaut. Pour l'activer sur Azure :
+
+1. Créer un jeton GitHub à granularité fine, limité à ce dépôt, avec la permission **Actions : lecture et écriture**.
+2. L'enregistrer dans Key Vault sous le nom `github-retrain-token`.
+3. Déployer `infra/main.bicep` avec `retrainRepository=<owner>/<repo>`.
+
+**Limite actuelle :** `retrain.yml` entraîne sur le jeu synthétique et journalise dans MLflow, dans un registre temporaire du conteneur. Il ne remplace donc pas encore le modèle en service et n'utilise pas les données qui ont dérivé. La boucle prouve le déclenchement, pas la correction de la dérive.
+
+`infra/alerts.bicep` ajoute des alertes Azure Monitor par e-mail sur les erreurs HTTP 5xx et les redémarrages en boucle. Le nombre de réplicas n'est pas surveillé, car zéro réplica est normal avec la mise à l'échelle à zéro :
+
+```powershell
+az deployment group create -g <groupe> --template-file infra/alerts.bicep --parameters containerAppName=<app> alertEmail=<adresse>
+```
+
+## Prototype local
 
 Prototype Windows, local et open source pour explorer des journaux/télémétries de robots, tester un traitement vidéo et exercer un cycle MLOps. Il ne requiert ni compte cloud, ni serveur de base de données externe, ni poids de modèle pré-entraîné ; SQLite, les artefacts du modèle et les rapports Evidently restent locaux. L'interface est publiée exclusivement sur `127.0.0.1`.
 
@@ -56,7 +112,7 @@ docker compose ps
 - Prometheus : <http://127.0.0.1:9090>
 - Evidently : <http://127.0.0.1:8000>
 
-Le dashboard **Marso Robotics MLOps**, sa source Prometheus et trois règles d'alerte (application indisponible, aucun modèle promu, pipeline en échec récent) sont provisionnés automatiquement. Prometheus affiche l'état des alertes, mais aucun Alertmanager ni canal de notification n'est inclus dans ce prototype. Arrêt sans supprimer les volumes :
+Le dashboard **Robotics MLOps**, sa source Prometheus et trois règles d'alerte (application indisponible, aucun modèle promu, pipeline en échec récent) sont provisionnés automatiquement. Prometheus affiche l'état des alertes, mais aucun Alertmanager ni canal de notification n'est inclus dans ce prototype. Arrêt sans supprimer les volumes :
 
 ```powershell
 docker compose down
@@ -93,7 +149,7 @@ Un panneau léger de type Airflow (sans Airflow) lance à la demande de petits g
 | `score_and_drift` | `validate_data` → `predict` → `drift_check` |
 | `analyze_logs` | `parse` → `incidents_kpis` |
 
-- `GET /api/pipelines` : définitions, paramètres, préréglages, dernière exécution. Le préréglage `Random Forest ajusté (AI4I)` reprend la meilleure ligne de `tools/results/ai4i_random_forest_sweep.json` et joint ce balayage comme artefact `tuning_results` quand un CSV étiqueté est fourni.
+- `GET /api/pipelines` : définitions, paramètres, préréglages, dernière exécution. Le préréglage `Random Forest ajusté (AI4I)` reprend la meilleure ligne de `tools/results/ai4i_random_forest_sweep.json` et joint ce balayage comme artefact `tuning_results` quand un CSV étiqueté est fourni. Les colonnes `air_temp_k`, `temp_delta_k`, `power_w`, `wear_torque` et `type_code` sont facultatives à l'entraînement ; un modèle entraîné avec elles les exige à la prédiction, et les modèles à quatre colonnes continuent de fonctionner.
 - `POST /api/pipelines/<nom>/run` : corps `{params, filename?, content?}` (CSV/JSONL ≤ 25 Mo, paramètres validés par liste blanche). Une seule exécution à la fois : `409` si une autre est active. Une tâche en cours n'est pas annulable ; un délai maximal par exécution (30 min) ignore les tâches restantes.
 - `GET /api/pipelines/runs` et `GET /api/pipelines/runs/<id>` : historique et détail par tâche. Si une tâche échoue, ses descendantes sont `skipped` (`upstream_failed`). Les erreurs renvoyées sont assainies (pas de trace d'appel).
 - Métriques Prometheus : `robotics_pipeline_runs_total{pipeline,status}`, `robotics_pipeline_run_duration_seconds` et `robotics_pipeline_active`.
@@ -124,15 +180,19 @@ Pour rester léger, hors ligne après le premier téléchargement et simple à i
 ## Tests
 
 ```powershell
-python -m pip install pytest
+python -m pip install -r requirements-dev.txt
+pre-commit install
+ruff check .
 python -m pytest -q
 ```
 
+Sous Linux, macOS ou Git Bash avec `make` : `make install`, puis `make check`.
+
 ## CI/CD (GitHub Actions)
 
-- `ci.yml` (PR et branches hors `main`) : tests, compilation Bicep, build Docker.
+- `ci.yml` (PR et branches hors `main`) : lint Ruff, tests, compilation Bicep, build Docker.
 - `deploy.yml` (push sur `main`) : tests → build ACR → déploiement (environnement `production`) → vérification de santé et redirection Entra ; réentraînement optionnel (`workflow_dispatch`).
-- `retrain.yml` (lundi 03:00 UTC ou manuel) : entraîne dans le conteneur et journalise dans MLflow (hyperparamètres, description).
+- `retrain.yml` (lundi 03:00 UTC, manuel ou déclenché par la dérive) : entraîne dans le conteneur et journalise dans MLflow (hyperparamètres, description).
 - Connexion Azure par OIDC, sans secret : variables du dépôt `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, `AZURE_REGISTRY_NAME`, `AZURE_APP_NAME`, `AZURE_GRAFANA_APP_NAME`, `AZURE_EVIDENTLY_APP_NAME` (facultatif). L'application Entra a le rôle Contributeur sur le groupe de ressources uniquement.
 
 ## Proposition d'architecture cible pour plusieurs To/jour
