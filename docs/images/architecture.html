@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+*{box-sizing:border-box}
+body{margin:0;width:1280px;height:560px;background:#fff;color:#1f2933;font:15px "Segoe UI",Arial,sans-serif;padding:26px 34px}
+h1{font-size:23px;margin:0 0 3px}
+p.s{margin:0 0 18px;color:#5b6773}
+.g{display:grid;grid-template-columns:230px 1fr 250px;gap:22px;height:425px}
+.c{border:1.5px solid #c9d2db;border-radius:10px;padding:12px;background:#f7f9fb}
+.c h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:#46515c;margin:0 0 10px}
+.azure{background:#eef5fc;border-color:#8db8e3}
+.b{background:#fff;border:1.5px solid #c9d2db;border-radius:7px;padding:8px 10px;margin-bottom:10px;line-height:1.3}
+.b b{display:block}.b span{color:#5b6773;font-size:13px}
+.main{border-color:#2f6fb5;border-width:2.5px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.loop{background:#fff6e8;border-color:#e0a84a}
+.flow{font-size:13px;color:#46515c;margin:6px 0 10px}
+</style></head><body>
+<h1>Robotics Data Lab: architecture on Azure</h1>
+<p class="s">Telemetry and video from upload to prediction, with drift monitoring that can trigger retraining</p>
+<div class="g">
+  <div class="c"><h2>Users and CI/CD</h2>
+    <div class="b"><b>Browser</b><span>Sign-in through Microsoft Entra ID</span></div>
+    <div class="b"><b>GitHub Actions: CI</b><span>Ruff, pytest, Bicep build, Docker build</span></div>
+    <div class="b"><b>GitHub Actions: Deploy</b><span>OIDC login, image build in ACR, rollout, smoke test</span></div>
+    <div class="b loop"><b>GitHub Actions: Retrain</b><span>Weekly, manual, or dispatched on drift</span></div>
+  </div>
+  <div class="c azure"><h2>Azure Container Apps (scale to zero)</h2>
+    <div class="b main"><b>Data Lab app (Python)</b><span>Log analysis, face pixelation with YuNet, Airflow-style pipelines, Isolation Forest and Random Forest, promotion gate (AUC ≥ 0.75, F1 ≥ 0.5)</span></div>
+    <div class="two">
+      <div class="b"><b>MLflow</b><span>Runs, parameters, models</span></div>
+      <div class="b"><b>Evidently UI</b><span>Drift snapshots</span></div>
+      <div class="b"><b>Grafana</b><span>Dashboards from Azure Monitor</span></div>
+      <div class="b"><b>Azure Files</b><span>Shared MLflow and Evidently store</span></div>
+    </div>
+    <div class="b loop"><b>Drift loop</b><span>Each prediction batch gets an Evidently report. When at least 50% of columns drift on 100 or more rows, the app dispatches retrain.yml, at most once per 24 h.</span></div>
+  </div>
+  <div class="c"><h2>Azure platform</h2>
+    <div class="b"><b>Container Registry</b><span>Versioned images</span></div>
+    <div class="b"><b>Key Vault</b><span>Secrets via managed identity</span></div>
+    <div class="b"><b>Log Analytics</b><span>Container logs</span></div>
+    <div class="b"><b>Azure Monitor alerts</b><span>HTTP 5xx and restart loops, sent by email</span></div>
+    <div class="b"><b>Bicep</b><span>All infrastructure as code</span></div>
+  </div>
+</div>
+</body></html>

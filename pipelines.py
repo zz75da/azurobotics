@@ -57,15 +57,15 @@ PRESETS: Dict[str, Dict[str, Any]] = {
     },
     TUNED_PRESET: {
         "label": "Random Forest ajusté (AI4I)",
-        "description": "Meilleure configuration du balayage AI4I ; à utiliser avec un CSV étiqueté.",
+        "description": "Meilleure configuration du balayage AI4I ; à utiliser avec un CSV issu de tools/convert_ai4i.py.",
         "hyperparameters": {
             "algorithm": "random_forest",
-            "n_estimators": 300,
+            "n_estimators": 100,
             "max_depth": 8,
-            "min_samples_leaf": 5,
+            "min_samples_leaf": 3,
             "class_weight": None,
-            "max_features": 0.5,
-            "decision_threshold": 0.32,
+            "max_features": 1.0,
+            "decision_threshold": 0.36,
         },
     },
 }
@@ -248,6 +248,9 @@ def _drift_check(ctx: Context) -> Dict[str, Any]:
         "evidently_snapshot_id": result.get("evidently_snapshot_id"),
         "anomaly_rate_pct": rate,
         "anomaly_rate_warning": rate > ANOMALY_RATE_WARNING_PCT,
+        "drift_share": result.get("drift_share"),
+        "drift_detected": result.get("drift_detected"),
+        "retrain": result.get("retrain"),
     }
 
 
@@ -301,6 +304,7 @@ def default_pipelines() -> Dict[str, Pipeline]:
                 Task("drift_check", "Contrôler la dérive", _drift_check, ("predict",)),
             ),
             summary=(("predict", "records"), ("predict", "anomaly_rate_pct"),
+                     ("drift_check", "drift_share"), ("drift_check", "retrain"),
                      ("drift_check", "evidently_snapshot_id")),
         ),
         Pipeline(

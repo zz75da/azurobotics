@@ -14,7 +14,6 @@ from urllib.request import Request, urlopen
 import cv2
 import numpy as np
 
-
 MAX_VIDEO_BYTES = 250 * 1024 * 1024
 YUNET_MODEL_NAME = "face_detection_yunet_2023mar.onnx"
 YUNET_MODEL_URL = (
@@ -174,13 +173,13 @@ def anonymize_video_isolated(
                 if not process.is_alive():
                     try:
                         message = queue.get(timeout=1)
-                    except Exception:
+                    except Exception as error:
                         process.join()
-                        raise RuntimeError("Le processus vidéo s'est arrêté (mémoire insuffisante ?).")
+                        raise RuntimeError("Le processus vidéo s'est arrêté (mémoire insuffisante ?).") from error
                 elif time.monotonic() > deadline:
                     process.kill()
                     process.join()
-                    raise RuntimeError("Le traitement vidéo a dépassé le délai autorisé.")
+                    raise RuntimeError("Le traitement vidéo a dépassé le délai autorisé.") from None
         process.join(timeout=30)
         if process.is_alive():
             process.kill()

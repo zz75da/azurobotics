@@ -64,3 +64,85 @@ def test_rejected_candidate_keeps_current_model_promoted(tmp_path, monkeypatch):
     assert promoted["status"] == "promoted"
     assert rejected["status"] == "rejected"
     assert service.status()["active_model"]["version"] == promoted["version"]
+
+
+def _drifted_csv(rows=200):
+    lines = ["timestamp,robot_id,event,duration_ms,battery_pct,x_m,y_m"]
+    lines += ["t,r,move,{},{},{},{}".format(500_000 + i, 5_000 + i, 9_000 + i, 9_000 + i) for i in range(rows)]
+    return "\n".join(lines) + "\n"
+
+
+def _trained_service(tmp_path):
+    service = MLOpsService(tmp_path / "m.sqlite3", tmp_path / "models", tmp_path / "ev")
+    service.train()
+    return service
+
+
+def test_drift_dispatches_retrain_once_per_cooldown(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr("mlops.dispatch_retrain", lambda share, snapshot: calls.append(share) or "dispatched")
+    service = _trained_service(tmp_path)
+    first = service.predict(_drifted_csv())
+    second = service.predict(_drifted_csv())
+    assert first["drift_detected"] and first["drift_share"] >= 0.5 and first["retrain"] == "dispatched"
+    assert second["retrain"] == "cooldown" and len(calls) == 1
+    assert "robotics_ml_retrain_triggers_total 1" in service.prometheus_metrics()
+
+
+def test_failed_dispatch_does_not_start_cooldown(tmp_path, monkeypatch):
+    monkeypatch.setattr("mlops.dispatch_retrain", lambda share, snapshot: "failed")
+    service = _trained_service(tmp_path)
+    assert service.predict(_drifted_csv())["retrain"] == "failed"
+    assert service.predict(_drifted_csv())["retrain"] == "failed"
+
+
+def test_small_or_stable_batches_do_not_retrain(tmp_path, monkeypatch):
+    monkeypatch.setattr("mlops.dispatch_retrain", lambda share, snapshot: pytest.fail("must not dispatch"))
+    service = _trained_service(tmp_path)
+    assert service.predict(_drifted_csv(rows=20))["retrain"] == "not_needed"
+    assert service.predict(make_sample_telemetry_csv())["retrain"] == "not_needed"
+
+
+def test_retrain_trigger_is_disabled_without_configuration(tmp_path, monkeypatch):
+    monkeypatch.delenv("GITHUB_RETRAIN_REPOSITORY", raising=False)
+    monkeypatch.delenv("GITHUB_RETRAIN_TOKEN", raising=False)
+    assert _trained_service(tmp_path).predict(_drifted_csv())["retrain"] == "disabled"
+
+
+def test_dispatch_posts_workflow_inputs(monkeypatch):
+    import json
+
+    import retrain_trigger
+
+    seen = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def fake_urlopen(request, timeout):
+        seen.update(url=request.full_url, body=json.loads(request.data), auth=request.get_header("Authorization"))
+        return Response()
+
+    monkeypatch.setenv("GITHUB_RETRAIN_REPOSITORY", "owner/repo")
+    monkeypatch.setenv("GITHUB_RETRAIN_TOKEN", "secret")
+    monkeypatch.setattr(retrain_trigger.urllib.request, "urlopen", fake_urlopen)
+    assert retrain_trigger.dispatch_retrain(0.75, "snap") == "dispatched"
+    assert seen["url"].endswith("/repos/owner/repo/actions/workflows/retrain.yml/dispatches")
+    assert seen["body"]["ref"] == "main" and "0.75" in seen["body"]["inputs"]["description"]
+    assert seen["auth"] == "Bearer secret"
+
+
+def test_dispatch_reports_network_failure(monkeypatch):
+    import retrain_trigger
+
+    def fail(request, timeout):
+        raise retrain_trigger.urllib.error.URLError("down")
+
+    monkeypatch.setenv("GITHUB_RETRAIN_REPOSITORY", "owner/repo")
+    monkeypatch.setenv("GITHUB_RETRAIN_TOKEN", "secret")
+    monkeypatch.setattr(retrain_trigger.urllib.request, "urlopen", fail)
+    assert retrain_trigger.dispatch_retrain(0.75, "snap") == "failed"

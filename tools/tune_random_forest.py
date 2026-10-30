@@ -22,6 +22,7 @@ from sklearn.metrics import f1_score, precision_score, recall_score, roc_auc_sco
 from sklearn.model_selection import StratifiedKFold, cross_val_predict, train_test_split
 
 FEATURES = ["duration_ms", "battery_pct", "x_m", "y_m"]
+OPTIONAL_FEATURES = ["air_temp_k", "temp_delta_k", "power_w", "wear_torque", "type_code"]
 GRID = {
     "n_estimators": [100, 300],
     "max_depth": [None, 8, 14],
@@ -32,13 +33,14 @@ GRID = {
 
 
 def tune(frame: pd.DataFrame) -> list[dict]:
-    x, y = frame[FEATURES], frame["is_anomaly"]
+    columns = FEATURES + [name for name in OPTIONAL_FEATURES if name in frame.columns]
+    x, y = frame[columns], frame["is_anomaly"]
     train_x, test_x, train_y, test_y = train_test_split(x, y, test_size=0.25, random_state=42, stratify=y)
     folds = StratifiedKFold(5, shuffle=True, random_state=42)
     results = []
     for values in itertools.product(*GRID.values()):
         params = dict(zip(GRID, values))
-        estimator = dict(params, random_state=42, n_jobs=1)
+        estimator = dict(params, random_state=42, n_jobs=-1)
         oof = cross_val_predict(RandomForestClassifier(**estimator), train_x, train_y, cv=folds, method="predict_proba")[:, 1]
         threshold, cv_f1 = max(
             ((float(t), f1_score(train_y, (oof >= t).astype(int), zero_division=0)) for t in np.arange(0.1, 0.9, 0.02)),
@@ -49,7 +51,7 @@ def tune(frame: pd.DataFrame) -> list[dict]:
         results.append(
             {
                 **params,
-                "decision_threshold": round(threshold, 2),
+                "threshold": round(threshold, 2),
                 "cv_f1": round(float(cv_f1), 4),
                 "test_f1": round(float(f1_score(test_y, predicted, zero_division=0)), 4),
                 "test_precision": round(float(precision_score(test_y, predicted, zero_division=0)), 4),

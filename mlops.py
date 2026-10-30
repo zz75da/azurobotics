@@ -7,7 +7,7 @@ import os
 import sqlite3
 import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -21,11 +21,13 @@ from sklearn.ensemble import IsolationForest, RandomForestClassifier
 from sklearn.metrics import f1_score, precision_recall_curve, precision_score, recall_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 
-from robot_data import make_sample_telemetry_csv
 from experiment_tracking import digest_text, log_training_run
-
+from retrain_trigger import dispatch_retrain
+from robot_data import make_sample_telemetry_csv
 
 FEATURES = ("duration_ms", "battery_pct", "x_m", "y_m")
+# Used by training when the CSV has them; a model then requires them at prediction time.
+OPTIONAL_FEATURES = ("air_temp_k", "temp_delta_k", "power_w", "wear_torque", "type_code")
 MODEL_NAME = "robot-telemetry-isolation-forest"
 EVIDENTLY_PROJECT_NAME = "Robotics - Telemetry Drift"
 LEGACY_EVIDENTLY_PROJECT_NAME = "Marso Robotics - Telemetry Drift"
@@ -38,6 +40,9 @@ MODEL_RETENTION = 3
 MODEL_HISTORY_RETENTION = 100
 EVIDENTLY_RUN_RETENTION = 500
 PROMOTION_THRESHOLDS = {"roc_auc": 0.75, "f1": 0.5}
+DRIFT_RETRAIN_SHARE = 0.5  # Evidently's default dataset-drift rule: half of the columns drifted.
+DRIFT_RETRAIN_MIN_ROWS = 100  # Smaller batches give unreliable drift tests.
+RETRAIN_COOLDOWN_HOURS = 24
 LOG = logging.getLogger("robotics-demo.mlops")
 ALGORITHMS = ("isolation_forest", "random_forest", "auto")
 DEFAULT_HYPERPARAMETERS: Dict[str, Any] = {
@@ -175,6 +180,8 @@ class MLOpsService:
         self._lock = threading.RLock()
         self._prediction_counts = {"normal": 0, "anomaly": 0}
         self._drift_reports = 0
+        self._last_drift_share: float | None = None
+        self._retrain_triggers = 0
         self._initialize()
         self._workspace = Workspace.create(str(self.evidently_path))
         projects = self._workspace.search_project(EVIDENTLY_PROJECT_NAME)
@@ -201,7 +208,6 @@ class MLOpsService:
         return connection
 
     def _initialize(self) -> None:
-        paths_to_remove: List[Path] = []
         with self._connect() as connection:
             connection.execute(
                 """
@@ -228,6 +234,16 @@ class MLOpsService:
                 )
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS ml_retrain_triggers (
+                    id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    drift_share REAL NOT NULL,
+                    evidently_snapshot_id TEXT NOT NULL
+                )
+                """
+            )
 
     def train(
         self,
@@ -245,7 +261,8 @@ class MLOpsService:
             raise ValueError(
                 "L'entraînement nécessite au moins {} lignes valides.".format(MIN_TRAINING_ROWS)
             )
-        features, labels = _to_training_data(records)
+        columns = FEATURES + tuple(name for name in OPTIONAL_FEATURES if name in records[0])
+        features, labels = _to_training_data(records, columns)
         class_counts = labels.value_counts()
         if len(class_counts) != 2:
             raise ValueError("La colonne is_anomaly doit contenir les deux classes 0 et 1.")
@@ -292,7 +309,7 @@ class MLOpsService:
             metrics[name] >= threshold for name, threshold in PROMOTION_THRESHOLDS.items()
         )
         version = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
-        snapshot_id = self._log_drift(_sample_rows(test_x, DRIFT_SAMPLE_ROWS), _sample_rows(train_x, REFERENCE_MAX_ROWS))
+        snapshot_id, _ = self._log_drift(_sample_rows(test_x, DRIFT_SAMPLE_ROWS), _sample_rows(train_x, REFERENCE_MAX_ROWS))
 
         artifact_path: Path | None = None
         temporary_path: Path | None = None
@@ -303,7 +320,7 @@ class MLOpsService:
                     artifact_path = self.artifacts_path / "{}.joblib".format(version)
                     temporary_path = artifact_path.with_suffix(".joblib.tmp")
                     joblib.dump(
-                        {"model": candidate, "reference": _sample_rows(train_x, REFERENCE_MAX_ROWS)},
+                        {"model": candidate, "reference": _sample_rows(train_x, REFERENCE_MAX_ROWS), "features": columns},
                         temporary_path,
                         compress=3,
                     )
@@ -368,8 +385,8 @@ class MLOpsService:
                 "contamination": round(contamination, 4),
                 "test_size": hp["test_size"],
                 "split_random_state": hp["random_state"],
-                "features": ",".join(FEATURES),
-                "feature_count": len(FEATURES),
+                "features": ",".join(columns),
+                "feature_count": len(columns),
                 "stratified_split": True,
             },
             metrics=metrics,
@@ -402,8 +419,6 @@ class MLOpsService:
             raise ValueError(
                 "La prédiction est limitée à {} lignes par lot.".format(MAX_PREDICTION_ROWS)
             )
-        features = _to_feature_data(records)
-        drift_features = _sample_rows(features, DRIFT_SAMPLE_ROWS)
         with self._lock:
             model_row = self._latest_promoted_model()
             if model_row is None:
@@ -420,7 +435,13 @@ class MLOpsService:
             artifact = joblib.load(artifact_path)
             model: IsolationForest = artifact["model"]
             reference: pd.DataFrame = artifact["reference"]
-            snapshot_id = self._log_drift(drift_features, reference)
+            columns = tuple(artifact.get("features", FEATURES))
+            missing = [name for name in columns if name not in records[0]]
+            if missing:
+                raise ValueError("Colonnes requises par le modèle : {}.".format(", ".join(missing)))
+            features = _to_feature_data(records, columns)
+            snapshot_id, drift_share = self._log_drift(_sample_rows(features, DRIFT_SAMPLE_ROWS), reference)
+            self._last_drift_share = drift_share
             predictions = np.concatenate(
                 [
                     (model.predict(features.iloc[start : start + PREDICTION_CHUNK_ROWS]) == -1).astype(int)
@@ -456,6 +477,10 @@ class MLOpsService:
                 )
             self._prediction_counts["anomaly"] += anomaly_count
             self._prediction_counts["normal"] += len(records) - anomaly_count
+        drift_detected = (
+            drift_share is not None and drift_share >= DRIFT_RETRAIN_SHARE and len(records) >= DRIFT_RETRAIN_MIN_ROWS
+        )
+        retrain_status = self._request_retrain(drift_share, snapshot_id) if drift_detected else "not_needed"
         LOG.info(
             "ml_prediction_batch_completed",
             extra={
@@ -471,6 +496,9 @@ class MLOpsService:
             "anomalies_detected": anomaly_count,
             "anomaly_rate_pct": round(100 * anomaly_count / len(records), 2),
             "evidently_snapshot_id": snapshot_id,
+            "drift_share": drift_share,
+            "drift_detected": drift_detected,
+            "retrain": retrain_status,
             "predictions": [
                 {
                     "robot_id": str(record.get("robot_id", "")),
@@ -482,9 +510,28 @@ class MLOpsService:
             "predictions_truncated": len(records) > 100,
         }
 
-    def _log_drift(self, current: pd.DataFrame, reference: pd.DataFrame) -> str:
+    def _request_retrain(self, drift_share: float, snapshot_id: str) -> str:
+        """Dispatch retrain.yml once per cooldown window. Never fails the prediction."""
+        cooldown = float(os.environ.get("RETRAIN_COOLDOWN_HOURS", RETRAIN_COOLDOWN_HOURS))
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=cooldown)).isoformat()
+        with self._lock, self._connect() as connection:
+            recent = connection.execute(
+                "SELECT 1 FROM ml_retrain_triggers WHERE created_at > ? LIMIT 1", (cutoff,)
+            ).fetchone()
+            if recent:
+                return "cooldown"
+            status = dispatch_retrain(drift_share, snapshot_id)
+            if status == "dispatched":
+                connection.execute(
+                    "INSERT INTO ml_retrain_triggers(id, created_at, drift_share, evidently_snapshot_id) VALUES (?, ?, ?, ?)",
+                    (uuid.uuid4().hex, _utc_now(), drift_share, snapshot_id),
+                )
+                self._retrain_triggers += 1
+        return status
+
+    def _log_drift(self, current: pd.DataFrame, reference: pd.DataFrame) -> Tuple[str, float | None]:
         with self._lock:
-            definition = DataDefinition(numerical_columns=list(FEATURES))
+            definition = DataDefinition(numerical_columns=list(current.columns))
             current_dataset = Dataset.from_pandas(current, data_definition=definition)
             reference_dataset = Dataset.from_pandas(reference, data_definition=definition)
             snapshot = Report([DataDriftPreset()]).run(
@@ -503,7 +550,7 @@ class MLOpsService:
             for old_run_id in run_ids[:-EVIDENTLY_RUN_RETENTION]:
                 self._workspace.delete_run(self._evidently_project.id, old_run_id)
             self._drift_reports += 1
-            return str(run.id)
+            return str(run.id), _drift_share(snapshot)
 
     def _latest_promoted_model(self) -> sqlite3.Row | None:
         with self._connect() as connection:
@@ -571,12 +618,23 @@ class MLOpsService:
             "# HELP robotics_ml_drift_reports_total Evidently drift reports stored locally.",
             "# TYPE robotics_ml_drift_reports_total counter",
             "robotics_ml_drift_reports_total {}".format(self._drift_reports),
+            "# HELP robotics_ml_retrain_triggers_total Retrain workflows dispatched after drift.",
+            "# TYPE robotics_ml_retrain_triggers_total counter",
+            "robotics_ml_retrain_triggers_total {}".format(self._retrain_triggers),
             "# HELP robotics_ml_predictions_total Predictions returned by this process.",
             "# TYPE robotics_ml_predictions_total counter",
         ]
         for outcome, count in sorted(self._prediction_counts.items()):
             lines.append(
                 'robotics_ml_predictions_total{{outcome="{}"}} {}'.format(outcome, count)
+            )
+        if self._last_drift_share is not None:
+            lines.extend(
+                [
+                    "# HELP robotics_ml_drift_share Share of drifted columns in the latest prediction batch.",
+                    "# TYPE robotics_ml_drift_share gauge",
+                    "robotics_ml_drift_share {}".format(self._last_drift_share),
+                ]
             )
         lines.extend(
             [
@@ -624,17 +682,24 @@ def _read_csv(content: str, require_labels: bool) -> List[Dict[str, str]]:
     return records
 
 
+def _drift_share(snapshot: Any) -> float | None:
+    for metric in snapshot.dict().get("metrics", []):
+        if str(metric.get("metric_name", "")).startswith("DriftedColumnsCount"):
+            return round(float(metric["value"]["share"]), 4)
+    return None
+
+
 def _sample_rows(frame: pd.DataFrame, limit: int) -> pd.DataFrame:
     if len(frame) <= limit:
         return frame
     return frame.sample(n=limit, random_state=42).reset_index(drop=True)
 
 
-def _to_feature_data(records: List[Dict[str, str]]) -> pd.DataFrame:
+def _to_feature_data(records: List[Dict[str, str]], columns: Tuple[str, ...] = FEATURES) -> pd.DataFrame:
     values = []
     for row_number, record in enumerate(records, start=2):
         row = []
-        for feature in FEATURES:
+        for feature in columns:
             try:
                 value = float(record[feature])
             except (TypeError, ValueError) as error:
@@ -647,11 +712,13 @@ def _to_feature_data(records: List[Dict[str, str]]) -> pd.DataFrame:
                 )
             row.append(value)
         values.append(row)
-    return pd.DataFrame(values, columns=FEATURES)
+    return pd.DataFrame(values, columns=columns)
 
 
-def _to_training_data(records: List[Dict[str, str]]) -> Tuple[pd.DataFrame, pd.Series]:
-    features = _to_feature_data(records)
+def _to_training_data(
+    records: List[Dict[str, str]], columns: Tuple[str, ...] = FEATURES
+) -> Tuple[pd.DataFrame, pd.Series]:
+    features = _to_feature_data(records, columns)
     labels = []
     for row_number, record in enumerate(records, start=2):
         try:

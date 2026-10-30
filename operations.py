@@ -12,7 +12,6 @@ from typing import Any, Callable, Dict, List, Optional
 
 from robot_data import analyze_text, make_sample_telemetry_csv
 
-
 JOB_NAME = "sample-telemetry-analysis"
 MIN_INTERVAL_SECONDS = 60
 MAX_INTERVAL_SECONDS = 86_400

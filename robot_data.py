@@ -12,7 +12,6 @@ from typing import Any, Dict, List
 
 from video_privacy import create_sample_video
 
-
 SAMPLE_ROWS = 600
 MAX_ROWS = 200_000
 

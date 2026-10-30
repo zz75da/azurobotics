@@ -11,7 +11,10 @@ param registryLoginServer string
 param tags object
 param tenantId string
 param mlflowStorageName string = ''
+param retrainRepository string = ''
+param retrainTokenSecretUri string = ''
 
+var retrainEnabled = !empty(retrainRepository) && !isPlaceholder
 var mlflowEnabled = !empty(mlflowStorageName)
 var appContainerImage = isPlaceholder ? 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest' : containerImage
 
@@ -78,6 +81,15 @@ module app 'br/public:avm/res/app/container-app:0.23.0' = {
             name: 'EVIDENTLY_WORKSPACE'
             value: '/mnt/mlflow/evidently'
           }
+        ] : [], retrainEnabled ? [
+          {
+            name: 'GITHUB_RETRAIN_REPOSITORY'
+            value: retrainRepository
+          }
+          {
+            name: 'GITHUB_RETRAIN_TOKEN'
+            secretRef: 'github-retrain-token'
+          }
         ] : [])
         volumeMounts: mlflowEnabled ? [
           {
@@ -126,13 +138,19 @@ module app 'br/public:avm/res/app/container-app:0.23.0' = {
     }
     secrets: isPlaceholder
       ? []
-      : [
+      : concat([
           {
             identity: 'system'
             keyVaultUrl: keyVaultSecretUri
             name: 'entra-client-secret'
           }
-        ]
+        ], retrainEnabled ? [
+          {
+            identity: 'system'
+            keyVaultUrl: retrainTokenSecretUri
+            name: 'github-retrain-token'
+          }
+        ] : [])
     tags: tags
     volumes: mlflowEnabled ? [
       {

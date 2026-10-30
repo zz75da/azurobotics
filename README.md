@@ -7,6 +7,29 @@ Plateforme d'exploration de télémétrie robot, de détection d'anomalies et d'
 
 Toutes les applications Azure sont protégées par **Microsoft Entra ID** (Easy Auth), récupèrent leurs secrets dans **Key Vault** par **identité managée** et descendent à **zéro réplica** quand elles ne servent pas. Le même code tourne aussi entièrement en local sur Windows (voir [Mode local](#mode-local-windows)).
 
+> **In English.** An end-to-end MLOps project on Azure: predictive maintenance on telemetry, face anonymisation for video, experiment tracking with MLflow, drift monitoring with Evidently and automated retraining. It runs on Azure Container Apps behind Microsoft Entra ID, is defined in Bicep and is deployed by GitHub Actions with OIDC. On the public AI4I 2020 dataset, feature engineering raised the held-out F1 from 0.52 to 0.88.
+
+![Architecture sur Azure](docs/images/architecture.png)
+
+## Problème métier et résultats
+
+Un arrêt machine non planifié coûte plus cher qu'une intervention préparée. L'objectif est de signaler les cycles à risque à partir des capteurs, avec assez de précision pour que les alertes restent crédibles. Les pannes sont rares : 3,39 % des 10 000 lignes d'[AI4I 2020](https://archive.ics.uci.edu/dataset/601) (UCI, CC BY 4.0). Un modèle qui répond toujours « pas de panne » atteint donc 96,6 % d'accuracy sans rien détecter. C'est pourquoi le projet suit le F1, la précision et le rappel, et non l'accuracy.
+
+Résultats sur le jeu de test (25 %, stratifié, jamais utilisé pour choisir la configuration ni le seuil) :
+
+| Random Forest sur AI4I | AUC | F1 | Précision | Rappel |
+| --- | --- | --- | --- | --- |
+| 4 colonnes d'origine ([balayage](tools/results/ai4i_random_forest_sweep_baseline.json)) | 0,957 | 0,52 | 0,76 | 0,40 |
+| 9 colonnes, dont 5 ajoutées ([balayage](tools/results/ai4i_random_forest_sweep.json)) | 0,981 | **0,88** | 0,96 | 0,81 |
+
+Sur 85 pannes du jeu de test, le modèle en détecte 81 % contre 40 % auparavant. Les colonnes ajoutées sont la puissance (couple × vitesse angulaire), l'écart de température process/air, l'usure × couple, la température de l'air et le type de produit. La configuration est retenue par F1 en validation croisée 5 plis sur l'entraînement uniquement, parmi 108 combinaisons.
+
+**À lire avec ces chiffres :** AI4I est un jeu de données *synthétique*, dont les pannes suivent des règles publiées (dissipation thermique, puissance, surcharge). Les nouvelles colonnes se rapprochent de ces règles, ce qui explique l'ampleur du gain. Sur de vraies machines, l'écart serait probablement plus faible.
+
+**Floutage des visages :** sur un proxy WIDER FACE de 4 images sources réservées au test, YuNet (en production) laisse 25,0 % de visages insuffisamment couverts à 90 % de couverture, et la meilleure configuration expérimentale SCRFD 2,8 %, au prix d'environ 47 % de surface masquée à tort et de 100 % de faux masques. Cet échantillon est trop petit pour conclure, et les poids SCRFD sont réservés à la recherche non commerciale : ils ne sont pas en production. Détails dans [docs/face-blur-experiments.md](docs/face-blur-experiments.md).
+
+![Interface du Data Lab](docs/images/ui.png)
+
 ---
 
 ## Sommaire
@@ -102,6 +125,7 @@ L'infrastructure est découpée en un déploiement **au niveau abonnement** (soc
 | `infra/mlflow.bicep` | Groupe de ressources | Compte de stockage + partage Azure Files, stockage d'environnement, identité, Container App MLflow + Easy Auth |
 | `infra/grafana.bicep` | Groupe de ressources | Identité, rôles de lecture Monitor/Log Analytics, Container App Grafana + Easy Auth |
 | `infra/evidently.bicep` | Groupe de ressources | Container App Evidently UI + Easy Auth (réutilise le partage et l'identité MLflow) |
+| `infra/alerts.bicep` | Groupe de ressources | Groupe d'actions et alertes Azure Monitor (erreurs 5xx, redémarrages en boucle) |
 | `infra/modules/*.bicep` | Modules | Registre, Log Analytics, Key Vault, environnement, Container App, rôles |
 
 ### Prérequis
@@ -150,9 +174,9 @@ Après la mise en place, les déploiements suivants passent uniquement par GitHu
 
 | Workflow | Déclencheur | Étapes |
 | --- | --- | --- |
-| `ci.yml` | PR et branches hors `main` | Tests pytest, `pip-audit` (indicatif), compilation des 4 templates Bicep, build des 3 images Docker |
+| `ci.yml` | PR et branches hors `main` | Lint Ruff, tests pytest, `pip-audit` (indicatif), compilation des 5 templates Bicep, build des 3 images Docker |
 | `deploy.yml` | Push sur `main` ou manuel | Tests → `az acr build` des 3 images → nouvelles révisions Container Apps (environnement GitHub `production`) → attente d'une révision **Healthy** et vérification de la redirection Entra → réentraînement optionnel |
-| `retrain.yml` | Lundi 03:00 UTC, manuel ou appelé par `deploy.yml` | Entraînement **dans le conteneur en production** via `az containerapp exec`, journalisé dans MLflow (hyperparamètres, description, tags `trigger`, `run_id`, `sha`) |
+| `retrain.yml` | Lundi 03:00 UTC, manuel, appelé par `deploy.yml` ou déclenché par la dérive | Entraînement **dans le conteneur en production** via `az containerapp exec`, journalisé dans MLflow (hyperparamètres, description, tags `trigger`, `run_id`, `sha`) |
 
 Chaque image applicative est taguée par le SHA du commit et chaque révision reçoit un suffixe `g<run_id>`, ce qui rend chaque déploiement traçable jusqu'au run GitHub.
 
@@ -163,15 +187,27 @@ Chaque image applicative est taguée par le SHA du commit et chaque révision re
 - **Entraînement** : `POST /api/ml/train` ou le pipeline `train_anomaly_model` ; algorithmes `isolation_forest` (par défaut, non supervisé), `random_forest` (supervisé) ou `auto`. Le score est mesuré sur un découpage test stratifié.
 - **Promotion** : un candidat n'est promu que si **ROC AUC ≥ 0,75** et **F1 ≥ 0,5** ; sinon il est rejeté et ne remplace pas le modèle en service. Un seuil de décision optimal en F1 est aussi calculé sur le jeu d'entraînement, à titre informatif.
 - **Suivi MLflow** : dès que `MLFLOW_TRACKING_URI` est défini (sur Azure : `file:/mnt/mlflow/mlruns`), chaque entraînement journalise paramètres, métriques, seuils de promotion, statut, tags et une **model card** générée. `MLFLOW_PUBLIC_URL` ajoute un lien vers le run dans l'UI.
-- **Réentraînement planifié** : `retrain.yml` réentraîne chaque semaine dans le conteneur de production, avec les mêmes garde-fous de promotion.
-- **Dérive** : `POST /api/ml/predict` produit un rapport Evidently écrit dans `EVIDENTLY_WORKSPACE` (`/mnt/mlflow/evidently`), consultable dans l'application Evidently UI derrière Entra.
-- **Données réelles** : `tools/convert_ai4i.py` convertit le jeu public UCI **AI4I 2020** (maintenance prédictive, CC BY 4.0) au format de télémétrie de l'application ; `tools/tune_random_forest.py` en tire un balayage d'hyperparamètres (seuil choisi par validation croisée 5 plis, jeu test jamais utilisé pour la sélection). Le préréglage « Random Forest ajusté (AI4I) » des pipelines reprend la meilleure ligne de `tools/results/ai4i_random_forest_sweep.json`.
+- **Réentraînement planifié** : `retrain.yml` réentraîne chaque semaine dans le conteneur de production et journalise le résultat dans MLflow.
+- **Dérive** : `POST /api/ml/predict` produit un rapport Evidently écrit dans `EVIDENTLY_WORKSPACE` (`/mnt/mlflow/evidently`), consultable dans l'application Evidently UI derrière Entra. La réponse et la tâche `drift_check` indiquent `drift_share`, `drift_detected` et `retrain` ; `/metrics` expose `robotics_ml_drift_share` et `robotics_ml_retrain_triggers_total`.
+- **Réentraînement sur dérive** : si au moins 50 % des colonnes dérivent sur un lot d'au moins 100 lignes, l'application déclenche `retrain.yml` par `workflow_dispatch`, au plus une fois par 24 h (`RETRAIN_COOLDOWN_HOURS`). Désactivé par défaut. Pour l'activer : créer un jeton GitHub à granularité fine limité au dépôt (**Actions : lecture et écriture**), l'enregistrer dans Key Vault sous `github-retrain-token`, puis déployer `infra/main.bicep` avec `retrainRepository=<owner>/<repo>`.
+- **Limite actuelle** : `retrain.yml` entraîne sur le jeu synthétique, dans un registre temporaire du conteneur. Le résultat arrive dans MLflow, mais il ne remplace pas le modèle en service et n'utilise pas les données qui ont dérivé. La boucle prouve le déclenchement, pas la correction de la dérive.
+- **Données réelles** : `tools/convert_ai4i.py` convertit le jeu public UCI **AI4I 2020** (maintenance prédictive, CC BY 4.0) au format de télémétrie de l'application ; `tools/tune_random_forest.py` en tire un balayage d'hyperparamètres (seuil choisi par validation croisée 5 plis, jeu test jamais utilisé pour la sélection). Le préréglage « Random Forest ajusté (AI4I) » des pipelines reprend la meilleure ligne de `tools/results/ai4i_random_forest_sweep.json`. Les colonnes `air_temp_k`, `temp_delta_k`, `power_w`, `wear_torque` et `type_code` sont facultatives à l'entraînement ; un modèle entraîné avec elles les exige à la prédiction, et les modèles à quatre colonnes continuent de fonctionner.
+
+  ```powershell
+  python tools/convert_ai4i.py --output ai4i_telemetry.csv
+  python tools/tune_random_forest.py --input ai4i_telemetry.csv --output sweep_results.json
+  ```
 
 ## Observabilité sur Azure
 
 - **Grafana sur Container Apps** avec la source **Azure Monitor** par identité managée (`azureAuthType: msi`), provisionnée automatiquement. Le dashboard **« Robotics on Azure (Container Apps) »** affiche les requêtes, les réplicas actifs (0 = mis à l'échelle à zéro), le CPU, la mémoire et les journaux applicatifs récents (hors sondes de santé) issus de **Log Analytics**.
 - **Logs** : l'application écrit des événements JSON (ID de requête, durée, statut, ID d'exécution) sur la console et dans `logs/app.jsonl` ; Container Apps les envoie à Log Analytics.
 - **Santé** : sonde de disponibilité Container Apps sur `/api/health`, vérifiée aussi par le smoke test du déploiement.
+- **Alertes Azure Monitor** : `infra/alerts.bicep` prévient par e-mail les propriétaires de l'abonnement en cas de plus de 5 erreurs 5xx en 5 minutes ou d'au moins 3 redémarrages en 15 minutes. Le nombre de réplicas n'est pas surveillé, car zéro réplica est normal ici.
+
+  ```bash
+  az deployment group create -g <groupe> --template-file infra/alerts.bicep --parameters containerAppName=<app>
+  ```
 - **Métriques Prometheus** : `GET /metrics` reste disponible (HTTP, pipelines, modèles), utilisé par la stack Prometheus/Grafana locale.
 
 ## Coûts et limites de l'environnement Azure
@@ -292,12 +328,13 @@ Le dashboard **Robotics MLOps**, sa source Prometheus et trois règles d'alerte 
 
 ```text
 .github/workflows/   ci.yml, deploy.yml, retrain.yml
-infra/               main.bicep (abonnement), mlflow/grafana/evidently.bicep, modules/
+infra/               main.bicep (abonnement), mlflow/grafana/evidently/alerts.bicep, modules/
 mlflow-server/       Image du serveur MLflow pour Container Apps
 grafana/             Image Grafana Azure (source Azure Monitor, dashboard Container Apps)
 monitoring/          Prometheus, alertes et Grafana pour la stack locale
 app.py               Serveur HTTP et API
 mlops.py             Entraînement, promotion, prédiction, dérive
+retrain_trigger.py   Déclenchement de retrain.yml sur dérive
 experiment_tracking.py  Journalisation MLflow et model cards
 pipelines.py         Graphes de tâches
 operations.py        Ordonnanceur et historique
@@ -305,16 +342,20 @@ observability.py     Logs JSON et métriques Prometheus
 robot_data.py        Analyse CSV/JSONL et jeu synthétique
 video_privacy.py     Anonymisation vidéo (YuNet)
 tools/               AI4I, tuning Random Forest, banc d'essai floutage, rejeu MLflow
-docs/                Expériences de floutage
+docs/                Expériences de floutage, images du README
 tests/               Tests pytest
 ```
 
 ## Tests
 
 ```powershell
-python -m pip install pytest
+python -m pip install -r requirements-dev.txt
+pre-commit install
+ruff check .
 python -m pytest -q
 ```
+
+Sous Linux, macOS ou Git Bash avec `make` : `make install`, puis `make check`.
 
 Les mêmes tests conditionnent chaque déploiement Azure dans `deploy.yml`.
 

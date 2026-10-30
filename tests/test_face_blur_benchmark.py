@@ -4,8 +4,15 @@ from pathlib import Path
 import numpy as np
 
 from tools.face_blur_benchmark import (
-    Clip, ClipFrame, Face, SourceImage, build_clip, build_transition_clip,
-    coverage_ratio, mask_rect, source_split,
+    Clip,
+    ClipFrame,
+    Face,
+    SourceImage,
+    build_clip,
+    build_transition_clip,
+    coverage_ratio,
+    mask_rect,
+    source_split,
 )
 
 
@@ -101,6 +108,7 @@ def test_replay_logs_local_run_without_network(tmp_path: Path, monkeypatch):
 
 def test_wider_reader_keeps_empty_negative_images(tmp_path: Path):
     import cv2
+
     from tools.face_blur_benchmark import read_wider_annotations
     root = tmp_path / "images"
     for name in ("negative.jpg", "positive.jpg"):

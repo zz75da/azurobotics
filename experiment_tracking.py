@@ -64,8 +64,8 @@ tags: [anomaly-detection, isolation-forest, robotics, telemetry]
 
 # {name}
 
-**Version:** {version}  
-**Status:** {status}  
+**Version:** {version}
+**Status:** {status}
 **Summary:** {summary}
 
 ## Intended use
