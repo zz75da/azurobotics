@@ -1,4 +1,4 @@
-# Marso Robotics — Data Lab local
+# Robotics — Data Lab local
 
 Prototype Windows, local et open source pour explorer des journaux/télémétries de robots, tester un traitement vidéo et exercer un cycle MLOps. Il ne requiert ni compte cloud, ni serveur de base de données externe, ni poids de modèle pré-entraîné ; SQLite, les artefacts du modèle et les rapports Evidently restent locaux. L'interface est publiée exclusivement sur `127.0.0.1`.
 
@@ -56,7 +56,7 @@ docker compose ps
 - Prometheus : <http://127.0.0.1:9090>
 - Evidently : <http://127.0.0.1:8000>
 
-Le dashboard **Marso Robotics MLOps**, sa source Prometheus et trois règles d'alerte (application indisponible, aucun modèle promu, pipeline en échec récent) sont provisionnés automatiquement. Prometheus affiche l'état des alertes, mais aucun Alertmanager ni canal de notification n'est inclus dans ce prototype. Arrêt sans supprimer les volumes :
+Le dashboard ** Robotics MLOps**, sa source Prometheus et trois règles d'alerte (application indisponible, aucun modèle promu, pipeline en échec récent) sont provisionnés automatiquement. Prometheus affiche l'état des alertes, mais aucun Alertmanager ni canal de notification n'est inclus dans ce prototype. Arrêt sans supprimer les volumes :
 
 ```powershell
 docker compose down
