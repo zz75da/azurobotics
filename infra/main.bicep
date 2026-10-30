@@ -22,6 +22,8 @@ param entraClientId string = ''
 param containerImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
 param enableIngress bool = false
 param mlflowStorageName string = ''
+@description('owner/name of the repository whose retrain.yml runs on drift. Empty disables it. Needs a github-retrain-token Key Vault secret.')
+param retrainRepository string = ''
 
 var tags = {
   'app-onboard-skill': 'true'
@@ -103,6 +105,8 @@ module containerApp './modules/container-app.bicep' = {
     keyVaultSecretUri: keyVault.outputs.entraClientSecretUri
     location: location
     mlflowStorageName: mlflowStorageName
+    retrainRepository: retrainRepository
+    retrainTokenSecretUri: '${keyVault.outputs.vaultUri}secrets/github-retrain-token'
     registryLoginServer: registry.outputs.loginServer
     tags: tags
     tenantId: tenantId
