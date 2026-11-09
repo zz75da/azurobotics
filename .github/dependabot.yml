@@ -15,6 +15,11 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    # Stay on Python 3.12 until the pinned ML stack ships wheels for newer versions
+    # (python:3.15-slim has no compiler, so source builds fail).
+    ignore:
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
   - package-ecosystem: docker
     directory: /grafana
     schedule:
@@ -23,6 +28,11 @@ updates:
     directory: /mlflow-server
     schedule:
       interval: monthly
+    # Stay on Python 3.12 until the pinned ML stack ships wheels for newer versions
+    # (python:3.15-slim has no compiler, so source builds fail).
+    ignore:
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
