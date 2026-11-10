@@ -81,6 +81,11 @@ module app 'br/public:avm/res/app/container-app:0.23.0' = {
             name: 'EVIDENTLY_WORKSPACE'
             value: '/mnt/mlflow/evidently'
           }
+          {
+            // Keeps the scheduler settings across restarts and scale-to-zero (see operations.py).
+            name: 'SCHEDULE_STATE_PATH'
+            value: '/mnt/mlflow/operations/schedule.json'
+          }
         ] : [], retrainEnabled ? [
           {
             name: 'GITHUB_RETRAIN_REPOSITORY'

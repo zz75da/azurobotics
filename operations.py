@@ -28,13 +28,18 @@ class PipelineOrchestrator:
         self,
         database_path: Path,
         model_trainer: Optional[Callable[[str], Dict[str, Any]]] = None,
+        schedule_path: Optional[Path] = None,
     ) -> None:
         self.database_path = database_path
         self.model_trainer = model_trainer
+        # The schedule is mirrored to a JSON file so it survives a container restart when the
+        # database is ephemeral. SQLite itself cannot live on the Azure Files mount (no locks).
+        self.schedule_path = schedule_path
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._initialize()
+        self._restore_schedule()
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(str(self.database_path), timeout=10)
@@ -90,6 +95,53 @@ class PipelineOrchestrator:
                 (RUN_RETENTION,),
             )
 
+    def _restore_schedule(self) -> None:
+        if self.schedule_path is None or not self.schedule_path.exists():
+            return
+        try:
+            saved = json.loads(self.schedule_path.read_text(encoding="utf-8"))
+            enabled, interval, next_run = saved["enabled"], saved["interval_seconds"], saved["next_run_at"]
+            if (
+                not isinstance(enabled, bool)
+                or isinstance(interval, bool)
+                or not isinstance(interval, int)
+                or not MIN_INTERVAL_SECONDS <= interval <= MAX_INTERVAL_SECONDS
+                or (next_run is not None and (isinstance(next_run, bool) or not isinstance(next_run, (int, float))))
+            ):
+                raise ValueError("invalid schedule values")
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            LOG.warning("schedule_restore_failed", extra={"error": str(error)})
+            return
+        if enabled and next_run is None:
+            next_run = time.time() + interval
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE jobs SET enabled = ?, interval_seconds = ?, next_run_at = ?, updated_at = ? WHERE name = ?",
+                (int(enabled), interval, next_run if enabled else None, utc_now(), JOB_NAME),
+            )
+        LOG.info("schedule_restored", extra={"enabled": enabled, "interval_seconds": interval})
+
+    def _save_schedule(self) -> None:
+        if self.schedule_path is None:
+            return
+        with self._connect() as connection:
+            job = connection.execute(
+                "SELECT enabled, interval_seconds, next_run_at FROM jobs WHERE name = ?", (JOB_NAME,)
+            ).fetchone()
+        state = {
+            "enabled": bool(job["enabled"]),
+            "interval_seconds": job["interval_seconds"],
+            "next_run_at": job["next_run_at"],
+        }
+        try:
+            self.schedule_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self.schedule_path.with_name(self.schedule_path.name + ".tmp")
+            temporary.write_text(json.dumps(state), encoding="utf-8")
+            temporary.replace(self.schedule_path)
+        except OSError as error:
+            # A failed save must not break scheduling; the schedule simply won't survive a restart.
+            LOG.warning("schedule_save_failed", extra={"error": str(error)})
+
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
@@ -127,6 +179,7 @@ class PipelineOrchestrator:
                 """,
                 (interval_seconds, next_run, utc_now(), JOB_NAME),
             )
+        self._save_schedule()
         LOG.info(
             "schedule_enabled",
             extra={"job_name": JOB_NAME, "interval_seconds": interval_seconds},
@@ -139,6 +192,7 @@ class PipelineOrchestrator:
                 "UPDATE jobs SET enabled = 0, next_run_at = NULL, updated_at = ? WHERE name = ?",
                 (utc_now(), JOB_NAME),
             )
+        self._save_schedule()
         LOG.info("schedule_disabled", extra={"job_name": JOB_NAME})
         return self.snapshot()
 
@@ -146,6 +200,8 @@ class PipelineOrchestrator:
         run_id = self._claim_run(force=False)
         if run_id is None:
             return False
+        # Claiming a scheduled run moved next_run_at forward.
+        self._save_schedule()
         self._execute(run_id)
         return True
 
@@ -153,6 +209,7 @@ class PipelineOrchestrator:
         run_id = self._claim_run(force=True)
         if run_id is None:
             return None
+        self._save_schedule()
         return self._execute(run_id)
 
     def _claim_run(self, force: bool) -> Optional[str]:
