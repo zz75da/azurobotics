@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -111,3 +112,40 @@ def test_failed_pipeline_is_persisted_and_not_reported_as_success(tmp_path: Path
     run = orchestrator.snapshot()["runs"][0]
     assert run["status"] == "failed"
     assert run["error"] == "synthetic test failure"
+
+
+def test_schedule_survives_a_restart_with_an_empty_database(tmp_path: Path):
+    state = tmp_path / "share" / "schedule.json"
+    first = PipelineOrchestrator(tmp_path / "first.sqlite3", schedule_path=state)
+    configured = first.configure_schedule(900)["job"]
+
+    # A restarted container starts with a fresh, empty database but the same shared file.
+    restored = PipelineOrchestrator(tmp_path / "second.sqlite3", schedule_path=state).snapshot()["job"]
+    assert restored["enabled"] == 1
+    assert restored["interval_seconds"] == 900
+    assert restored["next_run_at"] == configured["next_run_at"]
+
+    PipelineOrchestrator(tmp_path / "second.sqlite3", schedule_path=state).disable_schedule()
+    after_disable = PipelineOrchestrator(tmp_path / "third.sqlite3", schedule_path=state).snapshot()["job"]
+    assert after_disable["enabled"] == 0
+    assert after_disable["interval_seconds"] == 900
+
+
+def test_scheduled_run_saves_the_next_run_time(tmp_path: Path):
+    state = tmp_path / "schedule.json"
+    orchestrator = PipelineOrchestrator(tmp_path / "operations.sqlite3", schedule_path=state)
+    orchestrator.configure_schedule(60)
+    with orchestrator._connect() as connection:
+        connection.execute("UPDATE jobs SET next_run_at = 0 WHERE name = ?", (JOB_NAME,))
+
+    assert orchestrator.run_due_once() is True
+    assert json.loads(state.read_text(encoding="utf-8"))["next_run_at"] > 0
+
+
+@pytest.mark.parametrize("content", ["not json", '{"enabled": true}', '{"enabled": true, "interval_seconds": 5, "next_run_at": null}'])
+def test_invalid_schedule_file_is_ignored(tmp_path: Path, content: str):
+    state = tmp_path / "schedule.json"
+    state.write_text(content, encoding="utf-8")
+    job = PipelineOrchestrator(tmp_path / "operations.sqlite3", schedule_path=state).snapshot()["job"]
+    assert job["enabled"] == 0
+    assert job["interval_seconds"] == 300

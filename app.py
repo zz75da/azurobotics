@@ -424,6 +424,7 @@ def main() -> None:
     ORCHESTRATOR = PipelineOrchestrator(
         ROOT / "data" / "operations.sqlite3",
         model_trainer=MLOPS.train,
+        schedule_path=Path(os.environ["SCHEDULE_STATE_PATH"]) if os.environ.get("SCHEDULE_STATE_PATH") else None,
     )
     ORCHESTRATOR.start()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
