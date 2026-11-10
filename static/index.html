@@ -268,6 +268,11 @@
       const caption = document.createElement("span"); caption.textContent = label;
       card.append(strong, caption); container.append(card);
     }
+    let intervalEdited = false;
+    byId("interval").addEventListener("change", () => {
+      intervalEdited = true;
+      byId("opsStatus").textContent = "Fréquence modifiée : cliquez sur « Activer la planification » pour l’enregistrer.";
+    });
     async function refreshOperations() {
       const status = byId("opsStatus");
       try {
@@ -277,7 +282,8 @@
         addMetric(summary, "Planification", job.enabled ? "Activée" : "Désactivée");
         addMetric(summary, "Réussites", data.run_counts.success || 0);
         addMetric(summary, "Échecs", data.run_counts.failed || 0);
-        byId("interval").value = String(job.interval_seconds);
+        // The 5-second refresh must not overwrite a frequency the user picked but has not saved yet.
+        if (!intervalEdited) byId("interval").value = String(job.interval_seconds);
         const runs = byId("runs"); runs.replaceChildren();
         if (!data.runs.length) { runs.textContent = "Aucune exécution enregistrée."; }
         for (const run of data.runs) {
@@ -290,11 +296,11 @@
           row.append(date, state, count, detail); runs.append(row);
         }
         byId("logs").textContent = data.logs.slice(-30).map(item => JSON.stringify(item)).join("\n") || "Aucun journal pour le moment.";
-        status.textContent = job.enabled ? `Prochaine exécution : ${job.next_run_at ? new Date(job.next_run_at).toLocaleString() : "en attente"}` : "Ordonnanceur prêt ; planification désactivée.";
+        status.textContent = intervalEdited ? "Fréquence modifiée : cliquez sur « Activer la planification » pour l’enregistrer." : job.enabled ? `Prochaine exécution : ${job.next_run_at ? new Date(job.next_run_at).toLocaleString() : "en attente"}` : "Ordonnanceur prêt ; planification désactivée.";
       } catch (error) { status.textContent = error.message; }
     }
     byId("schedule").addEventListener("click", async () => {
-      try { await operationsRequest("/api/jobs/schedule", {interval_seconds:Number(byId("interval").value)}); await refreshOperations(); }
+      try { await operationsRequest("/api/jobs/schedule", {interval_seconds:Number(byId("interval").value)}); intervalEdited = false; await refreshOperations(); }
       catch (error) { byId("opsStatus").textContent = error.message; }
     });
     byId("stopSchedule").addEventListener("click", async () => {
