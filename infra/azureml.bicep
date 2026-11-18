@@ -1,16 +1,18 @@
 targetScope = 'resourceGroup'
 
 // Azure Machine Learning workspace for the training pipeline and model registry.
-// It reuses the existing Key Vault, storage account, container registry and Log Analytics, and
-// adds only the workspace and a workspace-based Application Insights. Training runs on serverless
-// compute, so nothing here bills while idle. Role assignments need Owner or User Access
-// Administrator, so this template is deployed by a person, not by the GitHub Actions identity.
+// The workspace gets its own storage account and Key Vault, so it has no access to the app's
+// storage (and its MLflow share) or the app's Key Vault. It reuses the container registry, with
+// AcrPush/AcrPull through its managed identity, and the Log Analytics workspace through a new
+// workspace-based Application Insights. Training runs on serverless compute, so nothing here
+// bills while idle. Role assignments need Owner or User Access Administrator, so this template is
+// deployed by a person, not by the GitHub Actions identity.
 
 param location string = resourceGroup().location
 param workspaceName string
-param applicationInsightsName string
 param storageAccountName string
 param keyVaultName string
+param applicationInsightsName string
 param registryName string
 param logAnalyticsName string
 param containerAppName string
@@ -25,20 +27,13 @@ param tags object = {}
 
 // Built-in role definition ids.
 var roles = {
-  contributor: 'b24988ac-6180-42a0-ab88-20f7382dd24c'
+  acrPush: '8311e382-0749-4cb8-b61a-899b2cf8f0dc'
+  acrPull: '7f951dda-4ed3-4680-a7ca-43fe172d538d'
   keyVaultAdministrator: '00482a5a-887f-4fb3-b363-3b7fe8e74483'
   storageBlobDataContributor: 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
   storageBlobDataReader: '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1'
   storageFileDataPrivilegedContributor: '69566ab7-960f-475b-8e7c-b3118f30c6bd'
   azureMlDataScientist: 'f6c7c914-8db3-469d-8ca1-694a8f32e121'
-}
-
-resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' existing = {
-  name: storageAccountName
-}
-
-resource keyVault 'Microsoft.KeyVault/vaults@2026-05-15' existing = {
-  name: keyVaultName
 }
 
 resource registry 'Microsoft.ContainerRegistry/registries@2025-11-01' existing = {
@@ -51,6 +46,40 @@ resource logWorkspace 'Microsoft.OperationalInsights/workspaces@2026-03-01' exis
 
 resource containerApp 'Microsoft.App/containerApps@2026-01-01' existing = {
   name: containerAppName
+}
+
+resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
+  name: storageAccountName
+  location: location
+  tags: tags
+  kind: 'StorageV2'
+  sku: {
+    name: 'Standard_LRS'
+  }
+  properties: {
+    minimumTlsVersion: 'TLS1_2'
+    supportsHttpsTrafficOnly: true
+    allowBlobPublicAccess: false
+    isHnsEnabled: false
+  }
+}
+
+resource keyVault 'Microsoft.KeyVault/vaults@2026-05-15' = {
+  name: keyVaultName
+  location: location
+  tags: tags
+  properties: {
+    tenantId: subscription().tenantId
+    sku: {
+      family: 'A'
+      name: 'standard'
+    }
+    enableRbacAuthorization: true
+    enableSoftDelete: true
+    softDeleteRetentionInDays: 7
+    // No purge protection, so the teardown script can remove the vault completely.
+    publicNetworkAccess: 'Enabled'
+  }
 }
 
 resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
@@ -88,7 +117,7 @@ resource workspace 'Microsoft.MachineLearningServices/workspaces@2025-09-01' = {
   }
 }
 
-// Workspace identity: what Azure ML needs on the resources it reuses.
+// Workspace identity: what Azure ML needs on its own storage and vault, and on the shared registry.
 resource wsKeyVault 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(keyVault.id, workspace.id, roles.keyVaultAdministrator)
   scope: keyVault
@@ -119,11 +148,21 @@ resource wsFile 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   }
 }
 
-resource wsRegistry 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(registry.id, workspace.id, roles.contributor)
+resource wsAcrPush 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(registry.id, workspace.id, roles.acrPush)
   scope: registry
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.contributor)
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.acrPush)
+    principalId: workspace.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource wsAcrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(registry.id, workspace.id, roles.acrPull)
+  scope: registry
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.acrPull)
     principalId: workspace.identity.principalId
     principalType: 'ServicePrincipal'
   }
