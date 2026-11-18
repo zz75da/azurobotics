@@ -42,11 +42,12 @@ Sur 85 pannes du jeu de test, le modèle en détecte 81 % contre 40 % auparavant
 6. [MLOps sur Azure](#mlops-sur-azure)
 7. [Observabilité sur Azure](#observabilité-sur-azure)
 8. [Coûts et limites de l'environnement Azure](#coûts-et-limites-de-lenvironnement-azure)
-9. [Fonctionnalités de l'application](#fonctionnalités-de-lapplication)
-10. [Mode local (Windows)](#mode-local-windows)
-11. [Structure du dépôt](#structure-du-dépôt)
-12. [Tests](#tests)
-13. [Architecture cible pour plusieurs To/jour](#architecture-cible-pour-plusieurs-tojour)
+9. [Azure Machine Learning et recherche de procédures](#azure-machine-learning-et-recherche-de-procédures)
+10. [Fonctionnalités de l'application](#fonctionnalités-de-lapplication)
+11. [Mode local (Windows)](#mode-local-windows)
+12. [Structure du dépôt](#structure-du-dépôt)
+13. [Tests](#tests)
+14. [Architecture cible pour plusieurs To/jour](#architecture-cible-pour-plusieurs-tojour)
 
 ---
 
@@ -219,6 +220,89 @@ Chaque image applicative est taguée par le SHA du commit et chaque révision re
 - MLflow utilise un store fichier, adapté à un environnement de démonstration, pas à une équipe nombreuse.
 - Pour éviter les coûts, supprimer le groupe de ressources : `az group delete -n <resource-group>`.
 
+## Azure Machine Learning et recherche de procédures
+
+> **Projet personnel.** Données publiques (AI4I 2020) et **notes de maintenance synthétiques**, rédigées pour la démonstration : ce ne sont pas des procédures réelles. Aucun usage en production.
+
+```mermaid
+flowchart LR
+    subgraph AML["Azure Machine Learning"]
+        P["prep<br/>AI4I → train/test"] --> T["train<br/>Random Forest (mlops.py)"] --> E["evaluate<br/>porte F1 ≥ 0,5"]
+        E -- "réussite" --> R[("Registre de modèles<br/>robot-telemetry-anomaly")]
+    end
+    C["Cluster cpu-ds2<br/>0 → 1 nœud, identité système"] -. "exécute" .-> AML
+    ACR[("Container Registry<br/>admin désactivé")] -. "image" .-> C
+    subgraph RAG["Recherche de procédures"]
+        N["docs/maintenance<br/>20 notes synthétiques"] --> B["build_index.py<br/>MiniLM 384 dim."] --> I[("Azure AI Search<br/>niveau Free")]
+        A["API FastAPI ca-search<br/>ingress interne, 0 → 1"] -- "hybride texte + vecteur" --> I
+    end
+    U["Lecture AI4I"] --> A
+    A -- "règles AI4I" --> F["type de panne probable"]
+    KV[("Key Vault<br/>clé de requête")] -. "référence" .-> A
+    A -. "1 ligne JSON par requête" .-> LA[("Log Analytics")]
+```
+
+### Pipeline d'entraînement Azure ML
+
+Trois composants (`ml/components/`) réutilisent le code de l'application : **prep** convertit AI4I et fait un découpage stratifié avec empreinte SHA-256 du jeu ; **train** entraîne le Random Forest ajusté de `mlops.py` ; **evaluate** mesure le F1 sur le jeu de test et **fait échouer le pipeline** sous le seuil, si bien que rien n'est enregistré. `ml/submit_pipeline.py` soumet le pipeline puis enregistre le modèle avec ses tags (jeu de données, F1, ROC AUC, commit git).
+
+| Exécution du 18/11/2026 | Valeur |
+| --- | --- |
+| Métriques (2 500 lignes de test) | F1 **0,879**, ROC AUC 0,981, précision 0,958, rappel 0,812 (identiques à l'exécution locale) |
+| Modèle enregistré | `robot-telemetry-anomaly` **v1** |
+| Durée / calcul | 9 min 18 s ; cluster `cpu-ds2` Standard_DS2_v2 dédié, revenu à 0 nœud ~4 min après |
+| Coût estimé | ~0,05 USD (moins de ~0,25 USD pour les quatre essais, construction d'image comprise) |
+
+Choix et écueils, détaillés dans les commits :
+
+- **Isolation** : l'espace Azure ML a son propre stockage et son propre Key Vault ; le rôle *Azure AI Administrator* qu'Azure ML s'attribue sur tout le groupe de ressources a été retiré (`infra/azureml-identity-roles.bicep` le remplace par Contributor sur ses seules ressources).
+- **Calcul** : le serverless ne sait pas utiliser l'identité système de l'espace pour tirer une image privée ; le cluster utilise une **identité système** (AcrPull ajouté par Azure ML, accès blob au seul stockage dédié). Le niveau *low priority* est impossible : quota régional de 0 vCPU.
+- **Registre** : Azure ML tire les images avec des jetons de portée ARM, refusés tant que *authentication-as-ARM* était désactivé (défaut du module AVM). Il est activé dans `infra/modules/container-registry.bicep` ; l'utilisateur admin reste désactivé.
+
+```bash
+python ml/submit_pipeline.py --workspace <espace> --resource-group <groupe> --subscription <abonnement> \
+    --compute cpu-ds2 --use-compute-identity [--raw ai4i2020.csv]
+```
+
+### Recherche de procédures (Azure AI Search)
+
+- **Service** : niveau **Free** (`infra/search.bicep`), 0 €. La recherche vectorielle y fonctionne (index HNSW 384 dimensions testé avant usage), dans la limite de 50 Mo et 3 index.
+- **Index** `maintenance-procedures` : 20 notes découpées en **40 extraits** (une section par extrait, titre en contexte), **222 Ko** dont 187 Ko de vecteurs. Champ `failure_type` filtrable et facettable.
+- **Embeddings** : `search/build_index.py` calcule les vecteurs avec sentence-transformers *all-MiniLM-L6-v2* ; l'API calcule ceux des requêtes avec **ONNX Runtime** (sans PyTorch), même révision épinglée et fichier vérifié par SHA-256. Test d'équivalence : cosinus minimal 0,999999998.
+- **Clés** : le niveau Free n'accepte pas l'authentification Entra ; les clés de requête et d'administration sont dans Key Vault. L'API lit la clé de requête par référence, avec un rôle limité à ce seul secret ; la clé d'administration ne sert qu'au script d'indexation.
+- **API** (`search/api.py`, Container App interne, 0 → 1 réplica) : `GET /search` (hybride texte + vecteur, top-k, filtre `failure_type`) et `POST /procedures` (lecture AI4I → types de panne probables → procédures). Aucune génération de réponse : l'API renvoie les passages retrouvés.
+
+**Types de panne par les règles publiées d'AI4I** (`search/failure_types.py`), comparés aux étiquettes des 10 000 lignes :
+
+| Type | Règle | Rappel | Précision |
+| --- | --- | --- | --- |
+| HDF (dissipation thermique) | écart process − air < 8,6 K et vitesse < 1380 tr/min | 1,000 | 1,000 |
+| PWF (puissance) | puissance < 3 500 W ou > 9 000 W | 1,000 | 1,000 |
+| OSF (surcharge) | usure × couple > 11 000 / 12 000 / 13 000 min·Nm (L/M/H) | 1,000 | 1,000 |
+| TWF (usure d'outil) | usure entre 200 et 240 min | 0,935 | **0,054** |
+
+**Pourquoi 0,054 pour TWF** : dans AI4I, l'outil est remplacé ou casse à un moment tiré **au hasard** entre 200 et 240 minutes d'usure. Une règle ne peut donc signaler que la fenêtre, où se trouvent 790 lignes pour 46 pannes réelles. `/procedures` présente TWF comme une **« fenêtre de risque d'usure (200-240 min) »**, pas comme une panne prédite. Trois pannes TWF étiquetées tombent même hors de la fenêtre (rappel 0,935).
+
+| Mesures (19/11/2026) | Valeur |
+| --- | --- |
+| Recall@3 (10 questions, `search/evaluate.py`) | **1,00** — corpus de 20 notes, questions rédigées par l'auteur des notes : chiffre optimiste, pas un benchmark |
+| Latence serveur `/search` (50 requêtes, Log Analytics) | P50 **112 ms**, P95 **195 ms** |
+| Latence serveur `/procedures` (10 requêtes) | P50 214 ms, P95 294 ms |
+| Démarrage à froid de l'API (0 → première réponse) | **30,7 s** (image de 650 Mo, chargement du modèle) |
+
+```kusto
+ContainerAppConsoleLogs
+| where ContainerAppName == "ca-search-dev-99ff" and Log has "search_query"
+| extend e = parse_json(Log)
+| summarize p50 = percentile(todouble(e.latency_ms), 50), p95 = percentile(todouble(e.latency_ms), 95) by tostring(e.endpoint)
+```
+
+### Coûts et démontage
+
+Coût du groupe de ressources au 19/11/2026 : **3,31 €** depuis le début du mois (Container Registry 2,90 €, stockage 0,40 €, Key Vault 0,02 € ; les données de coût ont environ un jour de retard). Une alerte budgétaire (`infra/budget.bicep`) prévient à 50 % et 100 % de **10 €/mois**. Azure AI Search Free : 0 € ; le cluster et les Container Apps descendent à zéro.
+
+`scripts/teardown_azureml_search.sh` supprime uniquement ce qui a été ajouté pour Azure ML et la recherche (et purge les deux secrets `search-*`), sans toucher à l'application ni à ses données.
+
 ---
 
 ## Fonctionnalités de l'application
@@ -329,6 +413,10 @@ Le dashboard **Robotics MLOps**, sa source Prometheus et trois règles d'alerte 
 ```text
 .github/workflows/   ci.yml, deploy.yml, retrain.yml
 infra/               main.bicep (abonnement), mlflow/grafana/evidently/alerts.bicep, modules/
+                     azureml*.bicep, search*.bicep, budget.bicep
+ml/                  Pipeline Azure ML : composants prep/train/evaluate, soumission, environnement
+search/              Recherche de procédures : règles AI4I, embeddings ONNX, index, API FastAPI
+scripts/             teardown_azureml_search.sh
 mlflow-server/       Image du serveur MLflow pour Container Apps
 grafana/             Image Grafana Azure (source Azure Monitor, dashboard Container Apps)
 monitoring/          Prometheus, alertes et Grafana pour la stack locale
@@ -342,7 +430,7 @@ observability.py     Logs JSON et métriques Prometheus
 robot_data.py        Analyse CSV/JSONL et jeu synthétique
 video_privacy.py     Anonymisation vidéo (YuNet)
 tools/               AI4I, tuning Random Forest, banc d'essai floutage, rejeu MLflow
-docs/                Expériences de floutage, images du README
+docs/                Expériences de floutage, images du README, maintenance/ (20 notes synthétiques)
 tests/               Tests pytest
 ```
 
@@ -358,6 +446,8 @@ python -m pytest -q
 Sous Linux, macOS ou Git Bash avec `make` : `make install`, puis `make check`.
 
 Les mêmes tests conditionnent chaque déploiement Azure dans `deploy.yml`.
+
+Tests facultatifs de la recherche, ignorés par défaut (dépendances ou ressources externes) : `pip install -r search/requirements-index.txt`, puis `AI4I_CSV=<ai4i2020.csv>` (accord règles/étiquettes), `RUN_EMBEDDING_PARITY=1` (équivalence ONNX/sentence-transformers) et `SEARCH_API_URL=<url>` (recall@3 sur l'index réel).
 
 ## Architecture cible pour plusieurs To/jour
 
