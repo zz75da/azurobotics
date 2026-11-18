@@ -1,0 +1,17 @@
+# Training environment for the Azure ML pipeline: the app's own pinned requirements, so a model
+# trained in Azure ML loads in the app, plus azureml-mlflow for tracking to the workspace.
+name: robotics-train
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+      - opencv-python-headless==4.10.0.84
+      - evidently==0.7.23
+      - joblib==1.6.0
+      - numpy==1.26.4
+      - pandas==2.2.3
+      - scikit-learn==1.6.1
+      - mlflow-skinny==3.17.2
+      - azureml-mlflow==1.62.0.post7

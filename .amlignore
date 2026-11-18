@@ -1,0 +1,23 @@
+# Keeps the code snapshot uploaded with each Azure ML job small.
+.git/
+.github/
+.venv/
+.worktrees/
+.face-blur-mlflow-verified/
+__pycache__/
+data/
+logs/
+downloads/
+docs/
+samples/
+static/
+infra/
+grafana/
+monitoring/
+mlflow-server/
+tests/
+tools/results/
+*.mp4
+*.avi
+*.pdf
+*.pptx
