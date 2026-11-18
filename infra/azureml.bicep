@@ -27,12 +27,10 @@ param tags object = {}
 
 // Built-in role definition ids.
 var roles = {
-  acrPush: '8311e382-0749-4cb8-b61a-899b2cf8f0dc'
+  acrPush: '8311e382-0749-4cb8-b61a-304f252e45ec'
   acrPull: '7f951dda-4ed3-4680-a7ca-43fe172d538d'
-  keyVaultAdministrator: '00482a5a-887f-4fb3-b363-3b7fe8e74483'
   storageBlobDataContributor: 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
   storageBlobDataReader: '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1'
-  storageFileDataPrivilegedContributor: '69566ab7-960f-475b-8e7c-b3118f30c6bd'
   azureMlDataScientist: 'f6c7c914-8db3-469d-8ca1-694a8f32e121'
 }
 
@@ -117,37 +115,12 @@ resource workspace 'Microsoft.MachineLearningServices/workspaces@2025-09-01' = {
   }
 }
 
-// Workspace identity: what Azure ML needs on its own storage and vault, and on the shared registry.
-resource wsKeyVault 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(keyVault.id, workspace.id, roles.keyVaultAdministrator)
-  scope: keyVault
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.keyVaultAdministrator)
-    principalId: workspace.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-resource wsBlob 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(storage.id, workspace.id, roles.storageBlobDataContributor)
-  scope: storage
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.storageBlobDataContributor)
-    principalId: workspace.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-resource wsFile 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(storage.id, workspace.id, roles.storageFileDataPrivilegedContributor)
-  scope: storage
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.storageFileDataPrivilegedContributor)
-    principalId: workspace.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
+// Workspace identity. On creation Azure ML grants its own identity Key Vault Administrator on its
+// vault and Storage Blob Data Contributor + Storage File Data Privileged Contributor on its storage
+// account, so those are not declared here (a second, identical assignment fails the deployment).
+// It also grants itself Azure AI Administrator on the whole resource group; that one is removed
+// after deployment because it would reach the app's storage and Key Vault (see the README).
+// Only the shared registry roles are declared.
 resource wsAcrPush 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(registry.id, workspace.id, roles.acrPush)
   scope: registry
