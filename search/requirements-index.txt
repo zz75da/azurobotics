@@ -1,0 +1,5 @@
+# Indexing script and embedding parity test, run on a workstation (not in the container).
+-r requirements.txt
+sentence-transformers==6.3.0
+azure-identity==1.27.0
+azure-keyvault-secrets==4.12.0

@@ -1,0 +1,8 @@
+# Search API (FastAPI Container App). No PyTorch: queries are embedded with ONNX Runtime.
+fastapi==0.165.0
+uvicorn==0.54.0
+onnxruntime==1.32.0
+tokenizers==0.23.3
+huggingface_hub==2.4.0
+numpy==2.5.5
+azure-search-documents==12.1.0
