@@ -24,7 +24,7 @@ sys.path.insert(0, str(REPO))
 
 from azure.ai.ml import Input, MLClient, Output, command, dsl  # noqa: E402
 from azure.ai.ml.constants import AssetTypes  # noqa: E402
-from azure.ai.ml.entities import Environment, Model  # noqa: E402
+from azure.ai.ml.entities import Environment, ManagedIdentityConfiguration, Model  # noqa: E402
 from azure.identity import DefaultAzureCredential  # noqa: E402
 
 MODEL_NAME = "robot-telemetry-anomaly"
@@ -52,7 +52,14 @@ def _raw_dataset(path: str | None) -> Path:
     return target
 
 
-def build_pipeline(environment: str, instance_type: str, f1_threshold: float, raw: Path):
+def build_pipeline(
+    environment: str,
+    instance_type: str,
+    f1_threshold: float,
+    raw: Path,
+    compute: str = "serverless",
+    identity_client_id: str | None = None,
+):
     prep_step = command(
         name="prep",
         display_name="prep: AI4I to telemetry schema, train/test split",
@@ -88,15 +95,21 @@ def build_pipeline(environment: str, instance_type: str, f1_threshold: float, ra
         environment=environment,
     )
 
-    @dsl.pipeline(name="ai4i_anomaly_training", compute="serverless", description="AI4I 2020: prep -> train -> evaluate (F1 gate)")
+    @dsl.pipeline(name="ai4i_anomaly_training", compute=compute, description="AI4I 2020: prep -> train -> evaluate (F1 gate)")
     def pipeline(raw_csv):
         prepared = prep_step(raw=raw_csv)
         trained = train_step(prepared=prepared.outputs.prepared)
         evaluated = evaluate_step(model_dir=trained.outputs.model_dir, prepared=prepared.outputs.prepared)
         # Step names come from the last variable bound to each node, so no loop variable here.
-        prepared.resources = {"instance_type": instance_type, "instance_count": 1}
-        trained.resources = {"instance_type": instance_type, "instance_count": 1}
-        evaluated.resources = {"instance_type": instance_type, "instance_count": 1}
+        if compute == "serverless":
+            prepared.resources = {"instance_type": instance_type, "instance_count": 1}
+            trained.resources = {"instance_type": instance_type, "instance_count": 1}
+            evaluated.resources = {"instance_type": instance_type, "instance_count": 1}
+        if identity_client_id:
+            # Identity-based datastores: each step reads and writes data as the cluster's identity.
+            prepared.identity = ManagedIdentityConfiguration(client_id=identity_client_id)
+            trained.identity = ManagedIdentityConfiguration(client_id=identity_client_id)
+            evaluated.identity = ManagedIdentityConfiguration(client_id=identity_client_id)
         return {
             "dataset": prepared.outputs.prepared,
             "model_dir": trained.outputs.model_dir,
@@ -119,7 +132,11 @@ def main() -> int:
     parser.add_argument("--resource-group", default=os.environ.get("AZURE_RESOURCE_GROUP"))
     parser.add_argument("--workspace", default=os.environ.get("AZUREML_WORKSPACE"))
     parser.add_argument("--raw", help="local AI4I 2020 CSV; downloaded from UCI when omitted")
-    parser.add_argument("--instance-type", default="Standard_DS2_v2")
+    parser.add_argument("--compute", default=os.environ.get("AZUREML_COMPUTE", "serverless"),
+                        help="cluster name, or serverless (serverless cannot pull from a registry without admin user)")
+    parser.add_argument("--identity-client-id", default=os.environ.get("AZUREML_COMPUTE_IDENTITY_CLIENT_ID"),
+                        help="client id of the cluster's user-assigned identity, used for data access")
+    parser.add_argument("--instance-type", default="Standard_DS2_v2", help="serverless only")
     parser.add_argument("--f1-threshold", type=float, default=0.5)
     parser.add_argument("--no-register", action="store_true", help="run the pipeline without registering the model")
     args = parser.parse_args()
@@ -136,7 +153,14 @@ def main() -> int:
         )
     )
     commit = _git_commit()
-    job = build_pipeline("{}:{}".format(environment.name, environment.version), args.instance_type, args.f1_threshold, _raw_dataset(args.raw))
+    job = build_pipeline(
+        "{}:{}".format(environment.name, environment.version),
+        args.instance_type,
+        args.f1_threshold,
+        _raw_dataset(args.raw),
+        args.compute,
+        args.identity_client_id,
+    )
     job.experiment_name = EXPERIMENT_NAME
     job.tags = {"git_commit": commit, "trigger": os.environ.get("GITHUB_EVENT_NAME", "manual")}
     started = time.time()
