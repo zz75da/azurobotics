@@ -121,10 +121,17 @@ def build_pipeline(
     return pipeline(raw_csv=Input(type=AssetTypes.URI_FILE, path=str(raw)))
 
 
-def _read_output(client: MLClient, job_name: str, output: str, filename: str) -> Dict[str, Any]:
+def _step_jobs(client: MLClient, pipeline_job: str) -> Dict[str, str]:
+    """Step display name -> step job name. Outputs live on the step jobs, not on the pipeline job."""
+    return {child.display_name: child.name for child in client.jobs.list(parent_job_name=pipeline_job)}
+
+
+def _read_output(client: MLClient, step_job: str, output: str, filename: str) -> Dict[str, Any]:
     folder = Path(tempfile.mkdtemp())
-    client.jobs.download(job_name, output_name=output, download_path=str(folder))
-    match = next(folder.rglob(filename))
+    client.jobs.download(step_job, output_name=output, download_path=str(folder))
+    match = next(folder.rglob(filename), None)
+    if match is None:
+        raise RuntimeError("{} not found in output {} of job {}".format(filename, output, step_job))
     return json.loads(match.read_text(encoding="utf-8"))
 
 
@@ -143,50 +150,57 @@ def main() -> int:
     parser.add_argument("--instance-type", default="Standard_DS2_v2", help="serverless only")
     parser.add_argument("--f1-threshold", type=float, default=0.5)
     parser.add_argument("--no-register", action="store_true", help="run the pipeline without registering the model")
+    parser.add_argument("--register-job", help="register the model of an already completed pipeline run")
     args = parser.parse_args()
     if not (args.subscription and args.resource_group and args.workspace):
         parser.error("subscription, resource group and workspace are required (flags or AZURE_* / AZUREML_WORKSPACE)")
 
     client = MLClient(DefaultAzureCredential(), args.subscription, args.resource_group, args.workspace)
-    environment = client.environments.create_or_update(
-        Environment(
-            name=ENVIRONMENT_NAME,
-            image=BASE_IMAGE,
-            conda_file=str(REPO / "ml" / "environment" / "conda.yml"),
-            description="App's pinned requirements plus azureml-mlflow.",
-        )
-    )
     commit = _git_commit()
-    job = build_pipeline(
-        "{}:{}".format(environment.name, environment.version),
-        args.instance_type,
-        args.f1_threshold,
-        _raw_dataset(args.raw),
-        args.compute,
-        args.identity_client_id,
-        args.use_compute_identity,
-    )
-    job.experiment_name = EXPERIMENT_NAME
-    job.tags = {"git_commit": commit, "trigger": os.environ.get("GITHUB_EVENT_NAME", "manual")}
-    started = time.time()
-    job = client.jobs.create_or_update(job)
-    print("submitted", job.name, job.studio_url, flush=True)
-    client.jobs.stream(job.name)
-    job = client.jobs.get(job.name)
-    print("status", job.status, "after", round(time.time() - started), "s", flush=True)
+    if args.register_job:
+        # Register the model of a pipeline run that already completed, without training again.
+        job = client.jobs.get(args.register_job)
+        commit = (job.tags or {}).get("git_commit", commit)
+    else:
+        environment = client.environments.create_or_update(
+            Environment(
+                name=ENVIRONMENT_NAME,
+                image=BASE_IMAGE,
+                conda_file=str(REPO / "ml" / "environment" / "conda.yml"),
+                description="App's pinned requirements plus azureml-mlflow.",
+            )
+        )
+        job = build_pipeline(
+            "{}:{}".format(environment.name, environment.version),
+            args.instance_type,
+            args.f1_threshold,
+            _raw_dataset(args.raw),
+            args.compute,
+            args.identity_client_id,
+            args.use_compute_identity,
+        )
+        job.experiment_name = EXPERIMENT_NAME
+        job.tags = {"git_commit": commit, "trigger": os.environ.get("GITHUB_EVENT_NAME", "manual")}
+        started = time.time()
+        job = client.jobs.create_or_update(job)
+        print("submitted", job.name, job.studio_url, flush=True)
+        client.jobs.stream(job.name)
+        job = client.jobs.get(job.name)
+        print("status", job.status, "after", round(time.time() - started), "s", flush=True)
     if job.status != "Completed":
         print("pipeline did not complete (a failed quality gate fails the evaluate step); nothing registered")
         return 1
 
-    metrics = _read_output(client, job.name, "metrics", "metrics.json")
-    dataset = _read_output(client, job.name, "dataset", "dataset.json")
+    steps = _step_jobs(client, job.name)
+    metrics = _read_output(client, steps["evaluated"], "metrics", "metrics.json")
+    dataset = _read_output(client, steps["prepared"], "prepared", "dataset.json")
     print("metrics", json.dumps(metrics))
     if args.no_register:
         return 0
     model = client.models.create_or_update(
         Model(
             name=MODEL_NAME,
-            path="azureml://jobs/{}/outputs/model_dir".format(job.name),
+            path="azureml://jobs/{}/outputs/model_dir".format(steps["trained"]),
             type=AssetTypes.CUSTOM_MODEL,
             description="AI4I 2020 anomaly detector (personal project). Joblib dict with model, reference and features.",
             tags={
