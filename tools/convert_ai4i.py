@@ -29,6 +29,7 @@ import argparse
 import csv
 import io
 import math
+import ssl
 import sys
 import urllib.request
 import zipfile
@@ -46,7 +47,15 @@ TYPE_CODES = {"L": 0, "M": 1, "H": 2}
 def load_source(path: str | None) -> str:
     if path:
         return Path(path).read_text(encoding="utf-8-sig")
-    with urllib.request.urlopen(URL, timeout=60) as response:
+    # Verify against certifi's CA bundle when available: some Windows Python installs carry an
+    # outdated store that rejects UCI's current certificate chain. Verification stays on.
+    try:
+        import certifi
+
+        context = ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        context = ssl.create_default_context()
+    with urllib.request.urlopen(URL, timeout=60, context=context) as response:
         archive = zipfile.ZipFile(io.BytesIO(response.read()))
     name = next(n for n in archive.namelist() if n.lower().endswith(".csv"))
     return archive.read(name).decode("utf-8-sig")
