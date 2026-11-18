@@ -59,6 +59,7 @@ def build_pipeline(
     raw: Path,
     compute: str = "serverless",
     identity_client_id: str | None = None,
+    use_compute_identity: bool = False,
 ):
     prep_step = command(
         name="prep",
@@ -105,11 +106,12 @@ def build_pipeline(
             prepared.resources = {"instance_type": instance_type, "instance_count": 1}
             trained.resources = {"instance_type": instance_type, "instance_count": 1}
             evaluated.resources = {"instance_type": instance_type, "instance_count": 1}
-        if identity_client_id:
-            # Identity-based datastores: each step reads and writes data as the cluster's identity.
-            prepared.identity = ManagedIdentityConfiguration(client_id=identity_client_id)
-            trained.identity = ManagedIdentityConfiguration(client_id=identity_client_id)
-            evaluated.identity = ManagedIdentityConfiguration(client_id=identity_client_id)
+        if identity_client_id or use_compute_identity:
+            # Identity-based datastores: each step reads and writes data as the cluster's identity
+            # (user-assigned when a client id is given, otherwise the cluster's system-assigned one).
+            prepared.identity = ManagedIdentityConfiguration(client_id=identity_client_id or None)
+            trained.identity = ManagedIdentityConfiguration(client_id=identity_client_id or None)
+            evaluated.identity = ManagedIdentityConfiguration(client_id=identity_client_id or None)
         return {
             "dataset": prepared.outputs.prepared,
             "model_dir": trained.outputs.model_dir,
@@ -136,6 +138,8 @@ def main() -> int:
                         help="cluster name, or serverless (serverless cannot pull from a registry without admin user)")
     parser.add_argument("--identity-client-id", default=os.environ.get("AZUREML_COMPUTE_IDENTITY_CLIENT_ID"),
                         help="client id of the cluster's user-assigned identity, used for data access")
+    parser.add_argument("--use-compute-identity", action="store_true",
+                        help="steps use the cluster's system-assigned identity for data access")
     parser.add_argument("--instance-type", default="Standard_DS2_v2", help="serverless only")
     parser.add_argument("--f1-threshold", type=float, default=0.5)
     parser.add_argument("--no-register", action="store_true", help="run the pipeline without registering the model")
@@ -160,6 +164,7 @@ def main() -> int:
         _raw_dataset(args.raw),
         args.compute,
         args.identity_client_id,
+        args.use_compute_identity,
     )
     job.experiment_name = EXPERIMENT_NAME
     job.tags = {"git_commit": commit, "trigger": os.environ.get("GITHUB_EVENT_NAME", "manual")}
